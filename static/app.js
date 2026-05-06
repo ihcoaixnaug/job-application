@@ -16,6 +16,18 @@ let greetingMode = 'fixed';
 let greetingTemplate = '';
 let kwChips = [];   // active search keyword chips
 
+const BASE_PREFIX = (() => {
+  const p = window.location.pathname;
+  if (p === '/job-application' || p.startsWith('/job-application/')) return '/job-application';
+  if (p === '/job-assistant' || p.startsWith('/job-assistant/')) return '/job-assistant';
+  return '';
+})();
+
+function withBase(path) {
+  if (/^https?:\/\//.test(path)) return path;
+  return `${BASE_PREFIX}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
 /* status pipeline */
 const PIPELINE = ['pending','applied','reviewing','testing','interviewing','offered','rejected'];
 const STATUS_LABEL = {
@@ -102,7 +114,7 @@ async function uploadResume(e) {
   const fd = new FormData();
   fd.append('file', file);
   try {
-    await fetch('/api/resume/upload', { method: 'POST', body: fd }).then(r => r.json());
+    await fetch(withBase('/api/resume/upload'), { method: 'POST', body: fd }).then(r => r.json());
     const full = await apiFetch('/api/resume');
     resumeText = full.text || '';
     document.getElementById('resumeText').value = resumeText;
@@ -924,7 +936,7 @@ function closeJobModal() {
 async function apiFetch(url, method = 'GET', body = null) {
   const opts = { method, headers: {} };
   if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-  const r = await fetch(url, opts);
+  const r = await fetch(withBase(url), opts);
   if (!r.ok) {
     let msg = `HTTP ${r.status}`;
     try { const d = await r.json(); msg = d.detail || msg; } catch (e) {}
