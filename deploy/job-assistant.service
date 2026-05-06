@@ -1,0 +1,38 @@
+# 求职助手 — systemd 服务单元
+#
+# 部署路径：/etc/systemd/system/job-assistant.service
+# 启用命令：
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable job-assistant
+#   sudo systemctl start job-assistant
+#   sudo systemctl status job-assistant
+#
+# 日志查看：journalctl -u job-assistant -f
+
+[Unit]
+Description=Job Application Assistant (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu                          # 替换为实际运行用户
+
+WorkingDirectory=/home/ubuntu/job-application   # 替换为实际路径
+
+# 使用 conda 环境（替换路径中的 anaconda3/miniconda3）
+ExecStart=/home/ubuntu/anaconda3/envs/job-assistant/bin/uvicorn \
+          main:app \
+          --host 127.0.0.1 \
+          --port 8000 \
+          --workers 1
+
+# 环境变量（OPENROUTER_API_KEY 也可在网页设置里填写，会持久化到 DB）
+EnvironmentFile=/home/ubuntu/job-application/.env
+
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>求职助手</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ===== Header ===== -->
+<header class="header">
+  <div class="logo">🎯 求职助手 <span>AI匹配 · 自动投递 · 进度追踪</span></div>
+  <div class="header-right">
+    <!-- Demo mode pill -->
+    <button class="demo-pill" id="demoPill" onclick="toggleDemoMode()" title="演示模式：使用本地示例数据，不真实投递">
+      <span class="demo-dot" id="demoDot"></span>
+      <span id="demoLabel">演示模式</span>
+    </button>
+    <!-- Funnel stats -->
+    <div class="funnel" id="funnel">
+      <div class="funnel-step"><span>待投</span><strong id="s-pending">0</strong></div>
+      <div class="funnel-step"><span>已投</span><strong id="s-applied">0</strong></div>
+      <div class="funnel-step"><span>筛选中</span><strong id="s-reviewing">0</strong></div>
+      <div class="funnel-step"><span>笔试</span><strong id="s-testing">0</strong></div>
+      <div class="funnel-step"><span>面试中</span><strong id="s-interviewing">0</strong></div>
+      <div class="funnel-step f-offer"><span>Offer</span><strong id="s-offered">0</strong></div>
+      <div class="funnel-step f-rejected"><span>未通过</span><strong id="s-rejected">0</strong></div>
+    </div>
+    <div id="bossStatusDot" class="boss-status-dot boss-status-dot--off" title="Boss直聘 未连接"></div>
+    <button class="btn btn-secondary btn-sm" id="bossWindowBtn" onclick="openBossWindow()">Boss窗口</button>
+    <div id="apiDot" class="api-dot api-dot--off" title="OpenRouter 未配置"></div>
+    <button class="btn btn-secondary btn-sm" onclick="openSettings()">⚙️ 设置</button>
+  </div>
+</header>
+
+<!-- ===== Layout ===== -->
+<div class="layout">
+
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar">
+
+    <!-- Resume -->
+    <div class="card">
+      <h3>📄 简历</h3>
+      <label class="upload-area" id="uploadArea">
+        <div id="uploadHint"><div class="upload-icon">📎</div><div class="upload-label">点击或拖拽上传简历</div><div class="upload-sub">.docx 格式，自动解析</div></div>
+        <div id="uploadedName" class="uploaded-name" style="display:none"></div>
+        <input type="file" accept=".docx" id="resumeFile" hidden onchange="uploadResume(event)">
+      </label>
+      <details id="resumeDetails" style="display:none;margin-top:8px">
+        <summary style="font-size:.72rem;color:var(--muted);cursor:pointer">查看解析内容 ▸</summary>
+        <textarea id="resumeText" rows="6" style="margin-top:6px;font-size:.72rem"></textarea>
+      </details>
+      <div id="resumeEmpty" style="font-size:.74rem;color:var(--muted);margin-top:6px">尚未上传简历</div>
+    </div>
+
+    <!-- Preferences -->
+    <div class="card">
+      <h3>🎯 投岗偏好</h3>
+      <div class="fg">
+        <textarea id="preferences" rows="2" placeholder="数据运营/策略运营/产品运营..."></textarea>
+        <small>用 / 分隔，AI匹配时优先推荐匹配方向</small>
+      </div>
+      <button class="btn btn-outline btn-sm btn-full" onclick="savePrefs()">💾 保存偏好</button>
+    </div>
+
+    <!-- Search -->
+    <div class="card">
+      <h3>🔍 搜索</h3>
+      <div class="fg">
+        <label>搜索关键词</label>
+        <div style="display:flex;gap:5px;margin-bottom:5px">
+          <input type="text" id="keyword" placeholder="输入关键词，按回车添加" onkeydown="kwInputKeydown(event)">
+          <button class="btn btn-ghost btn-sm" title="添加" onclick="addKwChip()">+</button>
+        </div>
+        <!-- keyword chips -->
+        <div class="kw-chips" id="kwChips"></div>
+        <div style="display:flex;gap:5px;margin-top:5px">
+          <button class="btn btn-outline btn-sm btn-full" id="kwGenBtn" onclick="generateKeywords()">🤖 AI 解析偏好</button>
+        </div>
+      </div>
+      <div class="fg">
+        <label>城市</label>
+        <div class="city-checks checks">
+          <label class="ck"><input type="checkbox" name="city" value="101010100" checked> 北京</label>
+          <label class="ck"><input type="checkbox" name="city" value="101020100"> 上海</label>
+          <label class="ck"><input type="checkbox" name="city" value="101280600"> 深圳</label>
+          <label class="ck"><input type="checkbox" name="city" value="101280100"> 广州</label>
+          <label class="ck"><input type="checkbox" name="city" value="101210100"> 杭州</label>
+          <label class="ck"><input type="checkbox" name="city" value="101270100"> 成都</label>
+          <label class="ck"><input type="checkbox" name="city" value="101250100"> 武汉</label>
+          <label class="ck"><input type="checkbox" name="city" value="101190400"> 南京</label>
+        </div>
+      </div>
+      <div class="fg">
+        <label>平台</label>
+        <div class="checks" style="flex-wrap:wrap;gap:6px 10px">
+          <label class="ck"><input type="checkbox" id="cb-boss" checked> Boss直聘</label>
+          <label class="ck"><input type="checkbox" id="cb-shixiseng" checked> 实习僧</label>
+          <label class="ck" id="bossActiveLabel" title="只保留今日活跃的HR发布的职位">
+            <input type="checkbox" id="cb-boss-active"> 仅今日活跃HR
+          </label>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:9px">
+        <div class="fg" style="flex:1;margin:0"><label>页数</label><input type="number" id="maxPages" value="2" min="1" max="5"></div>
+        <div class="fg" style="flex:1;margin:0"><label>Top N</label><input type="number" id="topN" value="30" min="5" max="100"></div>
+      </div>
+      <button class="btn btn-primary btn-full" id="searchBtn" onclick="startSearch()">🚀 搜索并 AI 匹配</button>
+    </div>
+
+    <!-- Progress -->
+    <div class="card" id="progCard" style="display:none">
+      <h3>⏳ 处理进度</h3>
+      <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
+      <div class="prog-msg"  id="progMsg">处理中...</div>
+    </div>
+
+  </aside>
+
+  <!-- ── Main ── -->
+  <main class="main">
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <!-- data-mode toggle: real vs demo -->
+        <div class="dtoggle">
+          <button class="dbtn active" id="dtReal"  onclick="switchDataMode('real',this)">📋 真实岗位</button>
+          <button class="dbtn"        id="dtDemo"  onclick="switchDataMode('demo',this)">🎭 演示岗位</button>
+        </div>
+        <div class="vtoggle">
+          <button class="vbtn active" onclick="switchView('kanban',this)">看板</button>
+          <button class="vbtn"        onclick="switchView('table',this)">列表</button>
+        </div>
+        <select class="filter" id="fPlatform" onchange="rerender()">
+          <option value="">全部平台</option>
+          <option value="boss">Boss直聘</option>
+          <option value="shixiseng">实习僧</option>
+        </select>
+        <select class="filter" id="fTier" onchange="rerender()">
+          <option value="">全部规模</option>
+          <option value="大厂">大厂</option>
+          <option value="中厂">中厂</option>
+          <option value="小厂">小厂</option>
+        </select>
+        <select class="filter" id="fScore" onchange="rerender()">
+          <option value="0">全部分数</option>
+          <option value="80">≥80分</option>
+          <option value="70">≥70分</option>
+          <option value="60">≥60分</option>
+        </select>
+        <select class="filter" id="fSort" onchange="rerender()">
+          <option value="score_desc">分数↓</option>
+          <option value="score_asc">分数↑</option>
+          <option value="title_asc">职位</option>
+          <option value="company_asc">公司</option>
+          <option value="location_asc">地点</option>
+          <option value="status_asc">状态</option>
+        </select>
+      </div>
+      <div class="toolbar-right">
+        <button class="btn btn-success btn-sm" onclick="applySelected()">✅ 批量投递选中</button>
+      </div>
+    </div>
+
+    <!-- Kanban -->
+    <div class="kanban" id="kanban">
+      <div class="col" data-status="pending">
+        <div class="col-head" style="--col-color:#94a3b8">
+          <span class="col-title"><span class="col-dot" style="background:#94a3b8"></span>待投递</span>
+          <span class="col-cnt" id="cnt-pending">0</span>
+        </div>
+        <div class="col-body" id="col-pending"><div class="col-empty">暂无职位</div></div>
+      </div>
+      <div class="col" data-status="applied">
+        <div class="col-head" style="--col-color:#3b82f6">
+          <span class="col-title"><span class="col-dot" style="background:#3b82f6"></span>已投递</span>
+          <span class="col-cnt" id="cnt-applied">0</span>
+        </div>
+        <div class="col-body" id="col-applied"><div class="col-empty">暂无职位</div></div>
+      </div>
+      <div class="col" data-status="reviewing">
+        <div class="col-head" style="--col-color:#f59e0b">
+          <span class="col-title"><span class="col-dot" style="background:#f59e0b"></span>简历筛选中</span>
+          <span class="col-cnt" id="cnt-reviewing">0</span>
+        </div>
+        <div class="col-body" id="col-reviewing"><div class="col-empty">暂无职位</div></div>
+      </div>
+      <div class="col col--testing" data-status="testing">
+        <div class="col-head" style="--col-color:#0ea5e9">
+          <span class="col-title"><span class="col-dot" style="background:#0ea5e9"></span>笔试/测评</span>
+          <span class="col-cnt" id="cnt-testing">0</span>
+        </div>
+        <div class="col-body" id="col-testing"><div class="col-empty">暂无职位</div></div>
+      </div>
+      <div class="col col--interview" data-status="interviewing">
+        <div class="col-head" style="--col-color:#10b981">
+          <span class="col-title"><span class="col-dot" style="background:#10b981"></span>面试中</span>
+          <span class="col-cnt" id="cnt-interviewing">0</span>
+        </div>
+        <div class="col-body" id="col-interviewing"><div class="col-empty">暂无职位</div></div>
+      </div>
+      <div class="col col--offer" data-status="offered">
+        <div class="col-head" style="--col-color:#8b5cf6">
+          <span class="col-title"><span class="col-dot" style="background:#8b5cf6"></span>🎉 Offer</span>
+          <span class="col-cnt" id="cnt-offered">0</span>
+        </div>
+        <div class="col-body" id="col-offered"><div class="col-empty">暂无职位</div></div>
+      </div>
+      <div class="col col--rejected" data-status="rejected">
+        <div class="col-head" style="--col-color:#ef4444">
+          <span class="col-title"><span class="col-dot" style="background:#ef4444"></span>未通过</span>
+          <span class="col-cnt" id="cnt-rejected">0</span>
+        </div>
+        <div class="col-body" id="col-rejected"><div class="col-empty">暂无职位</div></div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="tview" id="tview" style="display:none">
+      <table class="jtable">
+        <thead><tr>
+          <th><input type="checkbox" id="cbAll" onchange="toggleAll()"></th>
+          <th>分</th><th>职位</th><th>公司</th><th>薪资</th><th>地点</th><th>平台</th><th>规模</th><th>状态</th><th>操作</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+
+  </main>
+</div>
+
+<!-- ===== Settings Modal ===== -->
+<div class="modal" id="settingsModal">
+  <div class="modal-box">
+    <div class="mhead"><h2>⚙️ 设置</h2><button class="xbtn" onclick="closeSettings()">✕</button></div>
+    <div class="mbody">
+      <div class="fg"><label>OpenRouter API Key <small>永久保存到本地，下次启动自动加载</small></label>
+        <input type="password" id="apiKey" placeholder="sk-or-v1-..."></div>
+      <div class="fg"><label>模型</label>
+        <select id="modelSel">
+          <option value="deepseek/deepseek-chat-v3-0324">DeepSeek V3（推荐·中文强·极便宜）</option>
+          <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5（能力强）</option>
+          <option value="anthropic/claude-haiku-4-5">Claude Haiku 4.5（快速）</option>
+          <option value="openai/gpt-4o-mini">GPT-4o mini</option>
+          <option value="google/gemini-flash-1.5">Gemini Flash 1.5</option>
+        </select>
+      </div>
+
+      <!-- Greeting settings -->
+      <div class="msec">
+        <h4>💬 打招呼方式</h4>
+        <div class="fg">
+          <div class="checks" style="margin-bottom:8px">
+            <label class="ck"><input type="radio" name="greetingMode" value="fixed" id="greetFixed" onchange="onGreetingModeChange()"> 固定文案</label>
+            <label class="ck"><input type="radio" name="greetingMode" value="ai"    id="greetAI"    onchange="onGreetingModeChange()"> AI 个性化生成</label>
+          </div>
+          <div id="greetingTemplateWrap">
+            <label style="font-size:.72rem;color:var(--muted)">文案模版（可编辑，发送前仍可修改）</label>
+            <textarea id="greetingTplInput" rows="4" style="font-size:.8rem;margin-top:4px"></textarea>
+          </div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="saveGreetingSettings()">💾 保存打招呼设置</button>
+      </div>
+
+      <!-- Boss login -->
+      <div class="msec">
+        <h4>📱 Boss直聘</h4>
+        <p class="hint">使用系统 Chrome 打开扫码页，扫码完成后回到这里点"我已完成登录"。</p>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="bossLogin()">打开扫码窗口</button>
+          <button class="btn btn-primary btn-sm" id="bossSaveBtn" style="display:none" onclick="bossSaveSession()">✅ 我已完成登录，保存状态</button>
+        </div>
+        <span id="bossStatus" style="font-size:.72rem;color:var(--muted);display:block;margin-top:5px"></span>
+      </div>
+
+      <!-- 实习僧 login -->
+      <div class="msec">
+        <h4>🎓 实习僧</h4>
+        <p class="hint">点击打开登录窗口，在弹出浏览器中完成手机号验证码登录，完成后回到这里点"我已登录"。</p>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="text" id="sxsPhone" placeholder="手机号（选填，自动预填）" style="width:160px;font-size:.8rem">
+            <button class="btn btn-outline btn-sm" onclick="sxsSendCode()">打开登录窗口</button>
+          </div>
+          <button class="btn btn-primary btn-sm" id="sxsSaveBtn" style="display:none" onclick="sxsSaveSession()">✅ 我已登录，保存状态</button>
+        </div>
+        <span id="sxsStatus" style="font-size:.72rem;color:var(--muted);display:block;margin-top:5px"></span>
+      </div>
+    </div>
+    <div class="mfoot">
+      <button class="btn btn-secondary" onclick="closeSettings()">取消</button>
+      <button class="btn btn-primary"   onclick="saveSettings()">保存 API/模型</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Job Detail Modal ===== -->
+<div class="modal" id="jobModal">
+  <div class="modal-box wide">
+    <div class="mhead">
+      <h2 id="modalTitle">职位详情</h2>
+      <div style="display:flex;gap:6px;align-items:center">
+        <a id="modalLink" href="#" target="_blank" class="btn btn-ghost btn-sm">🔗 原帖</a>
+        <button class="xbtn" onclick="closeJobModal()">✕</button>
+      </div>
+    </div>
+    <div class="mbody" id="modalBody"></div>
+    <div class="mfoot">
+      <button class="btn btn-danger  btn-sm" onclick="rejectCurrent()">✕ 标记未通过</button>
+      <button class="btn btn-secondary"      onclick="closeJobModal()">关闭</button>
+      <button class="btn btn-primary" id="modalApplyBtn" onclick="applyCurrent()">🚀 投递</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Greeting Preview Modal ===== -->
+<div class="modal" id="greetingModal">
+  <div class="modal-box">
+    <div class="mhead"><h2>📝 确认打招呼文案</h2><button class="xbtn" onclick="closeGreetingModal()">✕</button></div>
+    <div class="mbody">
+      <div class="fg">
+        <label>打招呼内容（可编辑后发送）</label>
+        <textarea id="greetingText" rows="8" style="font-size:.84rem"></textarea>
+      </div>
+      <div id="greetingJobInfo" style="font-size:.75rem;color:var(--muted);margin-top:4px"></div>
+    </div>
+    <div class="mfoot">
+      <button class="btn btn-secondary" onclick="closeGreetingModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmSendGreeting()">🚀 确认发送</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

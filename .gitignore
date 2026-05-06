@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment / secrets
+.env
+*.key
+*.secret
+
+# Database
+data/jobs.db
+data/*.db
+
+# Browser profiles (contains session cookies / login state)
+data/chrome_profiles/
+
+# User data (resumes, cookies, personal files)
+data/resumes/
+data/cookies/
+data/*.xlsx
+data/*.xls
+
+# Generated files
+docs/*.docx
+docs/*.pdf
+docs/*.sb-*
+docs/._*
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Claude Code local settings
+.claude/
