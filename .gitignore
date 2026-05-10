@@ -34,6 +34,8 @@ data/*.xls
 # Generated files
 docs/*.docx
 docs/*.pdf
+docs/*.mp4
+docs/*.m4a
 docs/*.sb-*
 docs/._*
 
