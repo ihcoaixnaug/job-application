@@ -2,14 +2,53 @@
 import asyncio
 import json
 import os
+import re
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 import streamlit as st
 
 from company_tiers import get_company_tier
-from matcher import diagnose_resume, match_jobs
+from matcher import diagnose_resume, generate_greeting, generate_interview_prep, match_jobs
 from resume_parser import parse_docx
+
+# ── 示例简历（评委一键体验用）──────────────────────────────────────────────────
+SAMPLE_RESUME = """教育背景
+某985高校 | 应用经济学·数据科学方向 | 硕士 | GPA 3.9/4.0
+核心课程：机器学习、大数据分析、应用计量经济学、时间序列分析
+
+个人优势
+数据科学与运营双线背景，熟练掌握 Python、SQL、R、Tableau；
+具备 A/B 实验设计、用户分层（RFM）、因果推断（PSM-DID）等实战经验；
+具备 Vibe Coding 能力，可独立上线 Web 产品原型。
+
+实习经历
+某知名 AI 公司 | AI 策略运营实习生 | 2026.01–2026.04
+- 构建 AI 自动化数据标注方案，生成 985+ 结构化标签数据点，支撑多维筛选与语义推荐
+- 设计端到端用户决策链路（意图识别→路径优化），核心任务完成率 89%，满意度 4.4/5
+- 独立完成 Web 端产品原型，验证 Vibe Coding 可将孵化周期缩短约 70%
+
+某文化公司 | 用户运营实习生 | 2023.08–2024.08
+- 构建"推文曝光→社群咨询→线下参与"全链路漏斗模型，内容曝光量提升 85%，转化率提升 42%
+- 运用 SQL 构建 RFM 模型，将私域用户分为 8 类画像，唤醒 15% 沉睡用户
+- 独立对接 NGO 合作资源，单场活动 ROI 达过往同期 3.2 倍
+
+项目经历
+- 基于 LASSO 回归的受访者可接触性预测（AUC 0.72）
+- 基于 PSM-DID 模型的政府补贴政策影响评估（优秀毕业论文）
+
+技能
+Python（Pandas/Sklearn）、SQL、R、Excel、Tableau、A/B 测试、用户分层、因果推断"""
+
+# ── 技能关键词列表（用于需求词频分析）────────────────────────────────────────
+SKILL_KEYWORDS = [
+    "Python", "SQL", "Excel", "R语言", "Tableau", "Power BI",
+    "数据分析", "数据运营", "用户运营", "内容运营", "增长运营", "策略运营",
+    "A/B测试", "A/B", "漏斗分析", "用户画像", "RFM", "用户分层",
+    "数据看板", "BI", "指标体系", "商业分析",
+    "直播", "电商", "短视频", "游戏", "教育",
+]
 
 # ── 页面配置 ────────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -44,7 +83,7 @@ def load_demo_timeline_jobs() -> list[dict]:
         return json.load(f)
 
 
-# ── 工具函数（在 session state 之前定义）────────────────────────────────────────
+# ── 工具函数 ────────────────────────────────────────────────────────────────────
 def _read_secret(key: str) -> str:
     try:
         return st.secrets[key]
@@ -57,6 +96,35 @@ def set_api_key(key: str):
     os.environ["OPENROUTER_API_KEY"] = key
 
 
+def score_color(score: float) -> str:
+    if score >= 80:
+        return "🟢"
+    if score >= 65:
+        return "🟡"
+    return "🔴"
+
+
+def score_bar_color(score: float) -> str:
+    if score >= 80:
+        return "normal"
+    return "normal"
+
+
+def analyze_skill_gaps(jobs: list[dict], top_n: int = 20) -> tuple[list, list]:
+    """从高分岗位需求中提取高频技能，与内置技能列表比对。"""
+    high_score_jobs = [j for j in jobs if j.get("match_score", 0) >= 70]
+    req_text = " ".join(
+        (j.get("requirements") or "") + " " + (j.get("description") or "")
+        for j in high_score_jobs
+    )
+    freq = Counter()
+    for kw in SKILL_KEYWORDS:
+        count = len(re.findall(kw, req_text, re.IGNORECASE))
+        if count > 0:
+            freq[kw] = count
+    return freq.most_common(top_n)
+
+
 # ── Session state 初始化 ────────────────────────────────────────────────────────
 def _init_state():
     defaults = {
@@ -66,6 +134,9 @@ def _init_state():
         "preferences": "数据运营/策略运营/数据分析",
         "diagnosis_result": None,
         "diagnosis_job_id": None,
+        "interview_result": None,
+        "interview_job_id": None,
+        "greetings": {},       # job_id -> generated greeting text
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -99,14 +170,6 @@ TIMELINE_ICONS = {
 }
 
 
-def score_color(score: float) -> str:
-    if score >= 80:
-        return "🟢"
-    if score >= 65:
-        return "🟡"
-    return "🔴"
-
-
 # ── 侧边栏 ──────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("⚙️ 配置")
@@ -122,13 +185,13 @@ with st.sidebar:
     if st.session_state.api_key:
         st.success("✅ API Key 已配置")
     else:
-        st.warning("⚠️ 未配置 API Key，将使用预计算结果")
+        st.warning("⚠️ 未配置 API Key，将展示预计算结果")
 
     st.divider()
     st.subheader("📄 我的简历")
     resume_file = st.file_uploader("上传简历（.docx）", type=["docx"])
     resume_paste = st.text_area(
-        "或粘贴简历文本", height=120, placeholder="将简历内容粘贴在此处..."
+        "或粘贴简历文本", height=100, placeholder="将简历内容粘贴在此处..."
     )
 
     if resume_file:
@@ -139,6 +202,15 @@ with st.sidebar:
         st.success(f"✅ 已解析 {len(st.session_state.resume_text)} 字")
     elif resume_paste.strip():
         st.session_state.resume_text = resume_paste.strip()
+
+    # 一键体验按钮
+    if st.button("💡 使用示例简历一键体验", use_container_width=True,
+                 help="无需上传，直接加载内置示例简历并查看 AI 匹配效果"):
+        st.session_state.resume_text = SAMPLE_RESUME
+        st.success("✅ 示例简历已加载")
+
+    if st.session_state.resume_text:
+        st.caption(f"已加载简历：{len(st.session_state.resume_text)} 字")
 
     st.divider()
     st.subheader("🎯 求职意向")
@@ -164,12 +236,12 @@ with st.sidebar:
     st.divider()
     if st.button("🤖 AI 重新匹配", type="primary", use_container_width=True):
         if not st.session_state.resume_text:
-            st.error("请先上传简历或粘贴文本")
+            st.error("请先上传简历或点击「一键体验」")
         elif not st.session_state.api_key:
             st.error("请先填入 API Key")
         else:
             jobs_raw = load_jobs()
-            with st.spinner("AI 分析中，请稍候…"):
+            with st.spinner(f"AI 正在分析 {len(jobs_raw)} 条岗位，约需 1-2 分钟…"):
                 matched = asyncio.run(match_jobs(
                     st.session_state.resume_text,
                     [j.copy() for j in jobs_raw],
@@ -177,12 +249,14 @@ with st.sidebar:
                 ))
             st.session_state.matched_jobs = matched
             st.session_state.diagnosis_result = None
+            st.session_state.interview_result = None
+            st.session_state.greetings = {}
             st.rerun()
 
 
 # ── 主内容区 ────────────────────────────────────────────────────────────────────
 st.title("🎯 AI 求职智能匹配助手")
-st.caption("基于 DeepSeek 大模型，智能分析简历与岗位匹配度 · 129 条真实岗位数据")
+st.caption("基于 DeepSeek 大模型 · 129 条真实爬取岗位 · 覆盖求职全链路：匹配 → 诊断 → 沟通 → 面试 → 追踪")
 
 tab1, tab2, tab3, tab4 = st.tabs([
     "📊 岗位匹配看板",
@@ -209,25 +283,65 @@ with tab1:
         reverse=True,
     )
 
+    # ── 概览指标 ──
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("📋 筛选岗位", len(filtered))
+    c2.metric("🌟 高匹配 ≥80分", sum(1 for j in filtered if j.get("match_score", 0) >= 80))
+    c3.metric("📊 中匹配 60-79", sum(1 for j in filtered if 60 <= j.get("match_score", 0) < 80))
+    c4.metric("🏆 大厂机会", sum(1 for j in filtered if get_company_tier(j.get("company", "")) == "大厂"))
+    cities = {j.get("location", "").split("-")[0] for j in filtered if j.get("location")}
+    c5.metric("📍 覆盖城市", len(cities))
+
+    # ── 策略洞察 ──
+    with st.expander("🧠 求职策略洞察（基于岗位需求分析）", expanded=True):
+        ins_col1, ins_col2, ins_col3 = st.columns(3)
+
+        with ins_col1:
+            st.write("**🎯 优先投递 Top 5**")
+            for i, job in enumerate(filtered[:5], 1):
+                tier = get_company_tier(job.get("company", ""))
+                score = job.get("match_score", 0)
+                st.write(
+                    f"{i}. {job.get('company', '')} · {job.get('title', '')} "
+                    f"— {score_color(score)} {score:.0f}分"
+                )
+
+        with ins_col2:
+            st.write("**📚 高频需求技能**")
+            skill_freq = analyze_skill_gaps(filtered or all_jobs)
+            for skill, cnt in skill_freq[:8]:
+                bar_val = min(cnt / 20, 1.0)
+                st.write(f"`{skill}` 出现 {cnt} 次")
+
+        with ins_col3:
+            st.write("**💡 投递策略建议**")
+            high = sum(1 for j in filtered if j.get("match_score", 0) >= 80)
+            mid = sum(1 for j in filtered if 65 <= j.get("match_score", 0) < 80)
+            low = sum(1 for j in filtered if j.get("match_score", 0) < 65)
+            st.write(f"• 高匹配（≥80分）{high} 条：**优先冲刺**，尽快投递")
+            st.write(f"• 中匹配（65-79分）{mid} 条：**针对性优化简历**后投递")
+            st.write(f"• 低匹配（<65分）{low} 条：**作为保底**，或暂缓投递")
+            tier_dist = Counter(
+                get_company_tier(j.get("company", "")) for j in filtered[:20]
+            )
+            st.write(f"• Top 20 中：大厂 {tier_dist.get('大厂',0)} 个 / "
+                     f"中厂 {tier_dist.get('中厂',0)} 个 / "
+                     f"小厂 {tier_dist.get('小厂',0)} 个")
+
     if st.session_state.matched_jobs:
         st.info("📌 显示 AI 重新匹配结果")
     else:
-        st.info("📌 显示预计算匹配结果（上传简历后点击「AI 重新匹配」获取个性化评分）")
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("📋 当前岗位数", len(filtered))
-    c2.metric("🌟 高匹配（≥80分）", sum(1 for j in filtered if j.get("match_score", 0) >= 80))
-    c3.metric("🏆 大厂机会", sum(1 for j in filtered if get_company_tier(j.get("company", "")) == "大厂"))
-    cities = {j.get("location", "").split("-")[0] for j in filtered if j.get("location")}
-    c4.metric("📍 覆盖城市", len(cities))
+        st.info("📌 显示预计算匹配结果 — 上传简历后点击「AI 重新匹配」获取个性化评分")
 
     st.divider()
 
+    # ── 岗位卡片 ──
     for job in filtered:
         score = job.get("match_score", 0)
         tier = get_company_tier(job.get("company", ""))
         platform_label = PLATFORM_NAME.get(job.get("platform", ""), "")
         salary = job.get("salary") or "薪资面议"
+        job_uid = str(job.get("job_id") or job.get("id", ""))
 
         header = (
             f"{score_color(score)} **{score:.0f} 分** ｜ "
@@ -236,6 +350,8 @@ with tab1:
             f"{job.get('location', '')} ｜ {salary} ｜ {platform_label}"
         )
         with st.expander(header, expanded=False):
+            st.progress(int(score) / 100, text=f"匹配度 {score:.0f}%")
+
             col_l, col_r = st.columns([3, 2])
             with col_l:
                 if job.get("match_reason"):
@@ -252,6 +368,27 @@ with tab1:
                     st.write("**⚠️ 待补强**")
                     for c in concerns:
                         st.write(f"- {c}")
+
+                # ── 打招呼文案 ──
+                st.write("**📨 打招呼文案**")
+                greeting_key = f"greeting_{job_uid}"
+                existing = st.session_state.greetings.get(job_uid)
+                if existing:
+                    st.text_area("复制使用：", value=existing, height=80,
+                                 key=greeting_key, label_visibility="collapsed")
+                else:
+                    if st.button("✨ AI 生成打招呼", key=f"btn_greet_{job_uid}",
+                                 disabled=not st.session_state.api_key):
+                        with st.spinner("生成中…"):
+                            greeting = asyncio.run(generate_greeting(
+                                st.session_state.resume_text or SAMPLE_RESUME,
+                                job,
+                                st.session_state.preferences,
+                            ))
+                        st.session_state.greetings[job_uid] = greeting
+                        st.rerun()
+                    if not st.session_state.api_key:
+                        st.caption("需配置 API Key")
 
             with col_r:
                 desc = job.get("description") or ""
@@ -270,55 +407,67 @@ with tab1:
 # Tab 2：简历诊断与优化
 # ────────────────────────────────────────────────────────────────────────────────
 with tab2:
-    st.subheader("📋 简历诊断与优化建议")
-    st.write(
-        "选择一个目标岗位，AI 将深度诊断你的简历与该岗位的匹配情况，"
-        "给出**可直接落地**的简历改写建议。"
-    )
+    st.subheader("📋 简历诊断 · 改写建议 · 面试备考")
+    st.write("选择目标岗位，AI 一站式诊断简历差距、给出改写建议、生成面试备考题。")
 
     diag_jobs = st.session_state.matched_jobs or load_jobs()
     diag_jobs_sorted = sorted(diag_jobs, key=lambda x: x.get("match_score", 0), reverse=True)[:50]
 
     job_options = {
-        f"{j.get('title', '')} @ {j.get('company', '')}（{j.get('match_score', 0):.0f}分）": j
+        f"{score_color(j.get('match_score',0))} {j.get('title', '')} @ {j.get('company', '')}（{j.get('match_score', 0):.0f}分）": j
         for j in diag_jobs_sorted
     }
     selected_label = st.selectbox("选择目标岗位", list(job_options.keys()))
     selected_job = job_options[selected_label]
+    cur_job_id = str(selected_job.get("job_id") or selected_job.get("id", ""))
 
-    col_btn, col_tip = st.columns([1, 3])
-    with col_btn:
-        run_diag = st.button("🔍 生成诊断报告", type="primary")
-    with col_tip:
-        if not st.session_state.resume_text:
-            st.warning("⬅️ 请先在左侧上传简历")
-        elif not st.session_state.api_key:
-            st.warning("⬅️ 请先填入 API Key")
+    ready = st.session_state.resume_text and st.session_state.api_key
+    if not st.session_state.resume_text:
+        st.warning("⬅️ 请先在左侧上传简历，或点击「使用示例简历一键体验」")
+    elif not st.session_state.api_key:
+        st.warning("⬅️ 请先填入 API Key")
 
-    if run_diag:
-        if not st.session_state.resume_text:
-            st.error("请先上传简历或粘贴文本")
-        elif not st.session_state.api_key:
-            st.error("请先填入 OpenRouter API Key")
-        else:
-            with st.spinner("AI 深度分析中，约需 10-20 秒…"):
-                result = asyncio.run(diagnose_resume(
-                    st.session_state.resume_text,
-                    selected_job,
-                    st.session_state.preferences,
-                ))
-            st.session_state.diagnosis_result = result
-            st.session_state.diagnosis_job_id = selected_job.get("job_id") or selected_job.get("id")
+    btn_col1, btn_col2 = st.columns(2)
+    with btn_col1:
+        run_diag = st.button("🔍 简历诊断 + 改写建议", type="primary", disabled=not ready)
+    with btn_col2:
+        run_interview = st.button("🎤 生成面试备考题", type="primary", disabled=not ready)
 
+    # ── 执行诊断 ──
+    if run_diag and ready:
+        with st.spinner("AI 深度分析简历，约 15 秒…"):
+            result = asyncio.run(diagnose_resume(
+                st.session_state.resume_text,
+                selected_job,
+                st.session_state.preferences,
+            ))
+        st.session_state.diagnosis_result = result
+        st.session_state.diagnosis_job_id = cur_job_id
+
+    # ── 执行面试备考 ──
+    if run_interview and ready:
+        with st.spinner("AI 生成面试题，约 10 秒…"):
+            iv_result = asyncio.run(generate_interview_prep(
+                st.session_state.resume_text,
+                selected_job,
+                st.session_state.preferences,
+            ))
+        st.session_state.interview_result = iv_result
+        st.session_state.interview_job_id = cur_job_id
+
+    # ── 展示诊断结果 ──
     result = st.session_state.diagnosis_result
-    cur_job_id = selected_job.get("job_id") or selected_job.get("id")
     if result and st.session_state.diagnosis_job_id == cur_job_id:
         st.divider()
+        st.subheader("🔍 简历诊断结果")
         score_val = result.get("score", 0)
-        st.metric("综合匹配分", f"{score_val} / 100")
 
-        col_a, col_b = st.columns(2)
-        with col_a:
+        diag_c1, diag_c2, diag_c3 = st.columns([1, 2, 2])
+        with diag_c1:
+            st.metric("综合匹配分", f"{score_val} / 100")
+            st.progress(int(score_val) / 100)
+
+        with diag_c2:
             strengths = result.get("strengths") or []
             if strengths:
                 st.write("**🎯 核心匹配优势**")
@@ -331,16 +480,44 @@ with tab2:
                 for g in gaps:
                     st.warning(g)
 
-        with col_b:
+        with diag_c3:
             improvements = result.get("improvements") or []
             if improvements:
-                st.write("**✏️ 简历改写建议**")
+                st.write("**✏️ 可落地的简历改写建议**")
                 for i, tip in enumerate(improvements, 1):
-                    st.info(f"{i}. {tip}")
+                    st.info(f"**{i}.** {tip}")
 
         if result.get("summary"):
             st.divider()
-            st.write(f"**💬 AI 总结：** {result['summary']}")
+            st.markdown(f"> 💬 **AI 总结**：{result['summary']}")
+
+    # ── 展示面试备考 ──
+    iv = st.session_state.interview_result
+    if iv and st.session_state.interview_job_id == cur_job_id:
+        st.divider()
+        st.subheader("🎤 面试备考材料")
+
+        iv_col1, iv_col2 = st.columns([3, 2])
+        with iv_col1:
+            questions = iv.get("questions") or []
+            if questions:
+                st.write("**❓ 高频面试题 & 应答思路**")
+                for i, q in enumerate(questions, 1):
+                    with st.expander(f"Q{i}. {q.get('q', '')}", expanded=(i == 1)):
+                        st.write(f"💡 **应答要点**：{q.get('hint', '')}")
+
+        with iv_col2:
+            key_points = iv.get("key_points") or []
+            if key_points:
+                st.write("**⭐ 面试中需重点强调**")
+                for kp in key_points:
+                    st.success(kp)
+
+            red_flags = iv.get("red_flags") or []
+            if red_flags:
+                st.write("**🚩 需提前准备解释的弱点**")
+                for rf in red_flags:
+                    st.warning(rf)
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -349,40 +526,50 @@ with tab2:
 with tab3:
     demo_jobs = load_demo_timeline_jobs()
 
-    # ── 漏斗总览 ──
     st.subheader("📈 投递进度追踪")
     st.caption("演示数据：18 条岗位，覆盖从待投递到 Offer 的完整求职漏斗")
 
-    funnel_order = ["pending", "applied", "viewed", "chatting",
-                    "interview", "final_interview", "waiting", "offer", "rejected"]
-    funnel_labels = {
-        "pending": "待投递", "applied": "已投递", "viewed": "已查看",
-        "chatting": "沟通中", "interview": "面试中",
-        "final_interview": "终面", "waiting": "等待结果",
-        "offer": "Offer", "rejected": "已拒绝",
-    }
-    counts = {s: sum(1 for j in demo_jobs if j.get("status") == s) for s in funnel_order}
+    # ── 漏斗 ──
+    funnel_active = ["pending", "applied", "viewed", "chatting",
+                     "interview", "final_interview", "waiting", "offer"]
+    counts = {s: sum(1 for j in demo_jobs if j.get("status") == s) for s in STATUS_ORDER}
 
-    active_statuses = [s for s in funnel_order if s != "rejected"]
-    cols = st.columns(len(active_statuses))
-    for col, s in zip(cols, active_statuses):
+    cols = st.columns(len(funnel_active))
+    for col, s in zip(cols, funnel_active):
         icon, label, _ = STATUS_CONFIG.get(s, ("", s, ""))
         col.metric(f"{icon} {label}", counts.get(s, 0))
 
     rejected_count = counts.get("rejected", 0)
     st.caption(f"另有 {rejected_count} 条已拒绝")
 
+    # ── 简易漏斗可视化 ──
+    total_active = sum(counts.get(s, 0) for s in funnel_active)
+    if total_active > 0:
+        with st.expander("📊 投递漏斗可视化", expanded=True):
+            funnel_display = [
+                ("📤 已投递", counts.get("applied", 0) + counts.get("viewed", 0) + counts.get("chatting", 0)),
+                ("💬 进入面试", counts.get("interview", 0) + counts.get("final_interview", 0)),
+                ("⏳ 等待结果", counts.get("waiting", 0)),
+                ("🎉 获得 Offer", counts.get("offer", 0)),
+            ]
+            max_val = max(v for _, v in funnel_display) or 1
+            for label, val in funnel_display:
+                bar = val / max_val
+                st.write(f"**{label}** — {val} 条")
+                st.progress(bar)
+
     st.divider()
 
     # ── 筛选 ──
-    filter_cols = st.columns([2, 1])
-    with filter_cols[0]:
+    filter_col1, filter_col2 = st.columns([2, 1])
+    with filter_col1:
         status_options = ["全部"] + [
-            f"{STATUS_CONFIG[s][0]} {STATUS_CONFIG[s][1]}" for s in STATUS_ORDER
+            f"{STATUS_CONFIG[s][0]} {STATUS_CONFIG[s][1]}"
+            for s in STATUS_ORDER
             if any(j.get("status") == s for j in demo_jobs)
         ]
         status_filter = st.selectbox("按状态筛选", status_options, label_visibility="collapsed")
-    with filter_cols[1]:
+    with filter_col2:
         show_rejected = st.checkbox("显示已拒绝", value=True)
 
     # ── 岗位卡片 ──
@@ -399,7 +586,7 @@ with tab3:
         if not group_jobs:
             continue
 
-        icon, label, color = STATUS_CONFIG.get(status_group, ("", status_group, "#666"))
+        icon, label, _ = STATUS_CONFIG.get(status_group, ("", status_group, ""))
         st.markdown(f"### {icon} {label} ({len(group_jobs)})")
 
         for job in group_jobs:
@@ -462,44 +649,46 @@ with tab4:
 1. **海量岗位筛选难**：在数百条岗位中人工判断匹配度耗时且主观
 2. **简历命中率低**：不知道简历与目标岗位的具体差距，无法针对性优化
 
-### 解决方案
+### 解决方案：全链路 AI 求职智能体
 
-本系统通过两个 AI 智能体解决上述问题：
+本系统覆盖求职完整链路，通过 **4 个 AI 智能体模块**解决上述问题：
 
-| 模块 | 功能 | 技术实现 |
+| 模块 | 解决的问题 | 技术实现 |
 |---|---|---|
-| **岗位匹配智能体** | 对每条岗位评分（0-100）+ 匹配原因 + 亮点 + 风险点 | DeepSeek 结构化输出 |
-| **简历诊断智能体** | 针对具体岗位给出可操作的简历改写建议 | DeepSeek 多维度分析 |
+| **🎯 岗位匹配** | 129 条岗位秒级评分排序，优先级一目了然 | DeepSeek 结构化评分 |
+| **🧠 策略洞察** | 分析高频需求技能，给出投递优先级建议 | Python 词频分析 |
+| **📋 简历诊断** | 针对具体 JD 给出可落地的逐条改写建议 | DeepSeek 多维分析 |
+| **🎤 面试备考** | 生成高概率面试题 + 应答要点 + 弱点预警 | DeepSeek 角色扮演 |
+| **📈 投递追踪** | 可视化全链路进度，从待投递到 Offer | 数据可视化 |
 
 ### 数据说明
 
-- 129 条真实岗位数据，来源：Boss直聘 + 实习僧（Playwright 自动爬取）
-- 涵盖数据运营、策略运营、数据分析等方向
-- 覆盖北上广深成等主要城市，大/中/小厂均有
-- 「投递追踪」模块含 18 条演示数据，覆盖从待投递到 Offer 的完整求职漏斗
+- **129 条真实岗位**：通过 Playwright 自动爬取自 Boss直聘 + 实习僧，非模拟数据
+- **18 条演示投递记录**：覆盖从待投递到 Offer 的完整求职漏斗
 
 ### AI 工具选型
 
-- **模型**：DeepSeek Chat V3（通过 OpenRouter 调用）
-  - 中文能力强，理解招聘 JD 和简历的语义细节
-  - 成本低（约 ¥0.1/千次），适合批量匹配场景
-- **框架**：Streamlit — 快速构建可公开访问的 Web Demo
-- **后端**：Python + OpenAI SDK（兼容 OpenRouter）
+**DeepSeek Chat V3**（通过 OpenRouter 调用）
+- 中文理解能力强，可精准识别 JD 与简历的语义匹配
+- 支持结构化 JSON 输出，确保评分/建议格式稳定
+- 成本极低（约 ¥0.1/千次），支持 129 条岗位批量分析
 
-### 核心配置
+**Streamlit** — 快速部署至公网，0 运维成本
 
-```python
-# 评分维度权重（matcher.py）
-岗位方向匹配  25%
-技能匹配      35%
-经验匹配      25%
-教育背景      15%
+### 核心评分逻辑
+
+```
+岗位方向匹配  25%  ← 职位方向是否符合用户偏好
+技能匹配      35%  ← 技术栈/工具与职位要求的重合度
+经验匹配      25%  ← 项目/实习经历与岗位方向的相关性
+教育背景      15%  ← 学历、专业是否符合要求
 ```
 
 ### 迭代记录
 
-| 版本 | 变化 |
+| 版本 | 主要功能 |
 |---|---|
-| v1 | FastAPI + 原生 JS，支持真实爬虫自动投递 |
-| v2（当前）| Streamlit 重写，新增简历诊断 + 投递追踪模块，部署至公网 |
+| v1 | FastAPI 后端 + 原生 JS，支持真实爬虫自动投递 |
+| v2 | Streamlit 重构，接入 AI 匹配 + 简历诊断 |
+| v3（当前）| 新增打招呼生成、面试备考、策略洞察、一键体验 Demo |
 """)
