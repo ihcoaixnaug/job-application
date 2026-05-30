@@ -4,6 +4,25 @@
 
 ---
 
+## 本地开发环境
+
+**必须使用项目内的虚拟环境 `.venv`，禁止向全局 Python 环境安装依赖。**
+
+```bash
+# 首次初始化
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+# 启动服务
+.venv/bin/uvicorn main:app --reload --port 8000
+```
+
+- 不要用 `pip install`（全局），始终用 `.venv/bin/pip install`
+- 不要用 `python` / `uvicorn`（全局），始终用 `.venv/bin/python` / `.venv/bin/uvicorn`
+- `.venv/` 已在 `.gitignore` 中，不入 git
+
+---
+
 ## ⚠️ 最重要的硬性约束
 
 ### Boss直聘必须运行真实（有头）浏览器

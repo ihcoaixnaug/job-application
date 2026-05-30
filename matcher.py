@@ -156,6 +156,66 @@ async def generate_search_keywords(preferences: str) -> List[str]:
     return fallback
 
 
+async def diagnose_resume(resume: str, job: Dict, preferences: str = "") -> Dict:
+    """Deep per-job resume diagnosis: scores + concrete rewrite suggestions."""
+    fallback = {
+        "score": 0,
+        "strengths": [],
+        "gaps": [],
+        "improvements": ["请配置 OpenRouter API Key 后使用此功能"],
+        "summary": "未配置 API Key",
+    }
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if not api_key:
+        return fallback
+
+    job_text = (
+        f"职位：{job.get('title', '')}\n"
+        f"公司：{job.get('company', '')}\n"
+        f"岗位描述：{job.get('description', '')}\n"
+        f"岗位要求：{job.get('requirements', '')}"
+    )
+    prompt = f"""你是一个资深 HR，正在帮助应聘者诊断简历与目标岗位的匹配情况。
+
+目标岗位信息：
+{job_text}
+
+求职者意向：{preferences or "通用运营/数据分析"}
+
+求职者简历：
+{resume}
+
+请从 HR 视角，输出以下 JSON（严格格式，不加多余内容）：
+{{
+  "score": 85,
+  "strengths": ["与岗位高度匹配的优势1", "优势2"],
+  "gaps": ["简历中缺失或不足的方面1", "不足2"],
+  "improvements": [
+    "【经历描述】将「XX」改为「XX，产出XX结果，支撑XX决策」，更量化更贴合JD",
+    "【技能栏】补充「XX工具」，JD中明确提到但简历未体现",
+    "【项目描述】突出与岗位相关的XX能力"
+  ],
+  "summary": "一句话总结：该候选人匹配度及最关键的提升方向"
+}}
+
+improvements 必须给出 3 条以上具体可操作的建议，直接告诉候选人该如何修改。"""
+
+    client = _client()
+    try:
+        resp = await client.chat.completions.create(
+            model=_model(),
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = resp.choices[0].message.content or ""
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            return json.loads(m.group())
+    except Exception as e:
+        fallback["summary"] = f"分析失败：{str(e)[:80]}"
+    return fallback
+
+
 def _mock_match(jobs: List[Dict]) -> List[Dict]:
     """Fallback scoring when no API key is configured."""
     import random
