@@ -36,6 +36,14 @@ def load_jobs() -> list[dict]:
             j["company_tier"] = get_company_tier(j.get("company", ""))
     return jobs
 
+
+@st.cache_data
+def load_demo_timeline_jobs() -> list[dict]:
+    path = Path(__file__).parent / "data" / "demo_timeline_jobs.json"
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 # ── Session state 初始化 ────────────────────────────────────────────────────────
 def _init_state():
     defaults = {
@@ -55,7 +63,32 @@ def _init_state():
 
 _init_state()
 
-# ── 工具函数 ────────────────────────────────────────────────────────────────────
+# ── 常量 ────────────────────────────────────────────────────────────────────────
+TIER_BADGE = {"大厂": "🏆 大厂", "中厂": "🥈 中厂", "小厂": "🏅 小厂"}
+PLATFORM_NAME = {"boss": "Boss直聘", "shixiseng": "实习僧"}
+
+STATUS_CONFIG = {
+    "offer":           ("🎉", "Offer",    "#28a745"),
+    "final_interview": ("🔥", "终面",     "#fd7e14"),
+    "waiting":         ("⏳", "等待结果", "#6c757d"),
+    "interview":       ("💬", "面试中",   "#17a2b8"),
+    "chatting":        ("💬", "沟通中",   "#17a2b8"),
+    "viewed":          ("👀", "已查看",   "#007bff"),
+    "applied":         ("📤", "已投递",   "#6610f2"),
+    "pending":         ("📋", "待投递",   "#adb5bd"),
+    "rejected":        ("❌", "已拒绝",   "#dc3545"),
+}
+
+STATUS_ORDER = ["offer", "final_interview", "waiting", "interview", "chatting",
+                "viewed", "applied", "pending", "rejected"]
+
+TIMELINE_ICONS = {
+    "已投递": "📤", "HR已查看": "👀", "面试邀请": "📅", "约面试": "📅",
+    "一面": "💬", "二面": "💬", "终面": "🔥", "等待结果": "⏳",
+    "offer": "🎉", "已拒绝": "❌", "沟通中": "💬",
+}
+
+
 def score_color(score: float) -> str:
     if score >= 80:
         return "🟢"
@@ -63,12 +96,11 @@ def score_color(score: float) -> str:
         return "🟡"
     return "🔴"
 
-TIER_BADGE = {"大厂": "🏆 大厂", "中厂": "🥈 中厂", "小厂": "🏅 小厂"}
-PLATFORM_NAME = {"boss": "Boss直聘", "shixiseng": "实习僧"}
 
 def set_api_key(key: str):
     st.session_state.api_key = key
     os.environ["OPENROUTER_API_KEY"] = key
+
 
 # ── 侧边栏 ──────────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -107,7 +139,7 @@ with st.sidebar:
     st.subheader("🎯 求职意向")
     preferences_input = st.text_input(
         "方向偏好", value=st.session_state.preferences,
-        placeholder="如：数据运营、产品运营、商业分析"
+        placeholder="如：数据运营、产品运营、商业分析",
     )
     st.session_state.preferences = preferences_input
 
@@ -132,22 +164,28 @@ with st.sidebar:
             st.error("请先填入 API Key")
         else:
             jobs_raw = load_jobs()
-            progress = st.progress(0, text="AI 分析中…")
-            matched = asyncio.run(match_jobs(
-                st.session_state.resume_text,
-                [j.copy() for j in jobs_raw],
-                st.session_state.preferences,
-            ))
-            progress.progress(100, text="完成！")
+            with st.spinner("AI 分析中，请稍候…"):
+                matched = asyncio.run(match_jobs(
+                    st.session_state.resume_text,
+                    [j.copy() for j in jobs_raw],
+                    st.session_state.preferences,
+                ))
             st.session_state.matched_jobs = matched
             st.session_state.diagnosis_result = None
             st.rerun()
+
 
 # ── 主内容区 ────────────────────────────────────────────────────────────────────
 st.title("🎯 AI 求职智能匹配助手")
 st.caption("基于 DeepSeek 大模型，智能分析简历与岗位匹配度 · 129 条真实岗位数据")
 
-tab1, tab2, tab3 = st.tabs(["📊 岗位匹配看板", "📋 简历诊断与优化", "ℹ️ 项目说明"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📊 岗位匹配看板",
+    "📋 简历诊断与优化",
+    "📈 投递进度追踪",
+    "ℹ️ 项目说明",
+])
+
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Tab 1：岗位匹配看板
@@ -222,6 +260,7 @@ with tab1:
                 if job.get("url"):
                     st.link_button("🔗 查看原岗位", job["url"])
 
+
 # ────────────────────────────────────────────────────────────────────────────────
 # Tab 2：简历诊断与优化
 # ────────────────────────────────────────────────────────────────────────────────
@@ -264,10 +303,11 @@ with tab2:
                     st.session_state.preferences,
                 ))
             st.session_state.diagnosis_result = result
-            st.session_state.diagnosis_job_id = selected_job.get("job_id")
+            st.session_state.diagnosis_job_id = selected_job.get("job_id") or selected_job.get("id")
 
     result = st.session_state.diagnosis_result
-    if result and st.session_state.diagnosis_job_id == selected_job.get("job_id"):
+    cur_job_id = selected_job.get("job_id") or selected_job.get("id")
+    if result and st.session_state.diagnosis_job_id == cur_job_id:
         st.divider()
         score_val = result.get("score", 0)
         st.metric("综合匹配分", f"{score_val} / 100")
@@ -297,10 +337,118 @@ with tab2:
             st.divider()
             st.write(f"**💬 AI 总结：** {result['summary']}")
 
+
 # ────────────────────────────────────────────────────────────────────────────────
-# Tab 3：项目说明
+# Tab 3：投递进度追踪
 # ────────────────────────────────────────────────────────────────────────────────
 with tab3:
+    demo_jobs = load_demo_timeline_jobs()
+
+    # ── 漏斗总览 ──
+    st.subheader("📈 投递进度追踪")
+    st.caption("演示数据：18 条岗位，覆盖从待投递到 Offer 的完整求职漏斗")
+
+    funnel_order = ["pending", "applied", "viewed", "chatting",
+                    "interview", "final_interview", "waiting", "offer", "rejected"]
+    funnel_labels = {
+        "pending": "待投递", "applied": "已投递", "viewed": "已查看",
+        "chatting": "沟通中", "interview": "面试中",
+        "final_interview": "终面", "waiting": "等待结果",
+        "offer": "Offer", "rejected": "已拒绝",
+    }
+    counts = {s: sum(1 for j in demo_jobs if j.get("status") == s) for s in funnel_order}
+
+    active_statuses = [s for s in funnel_order if s != "rejected"]
+    cols = st.columns(len(active_statuses))
+    for col, s in zip(cols, active_statuses):
+        icon, label, _ = STATUS_CONFIG.get(s, ("", s, ""))
+        col.metric(f"{icon} {label}", counts.get(s, 0))
+
+    rejected_count = counts.get("rejected", 0)
+    st.caption(f"另有 {rejected_count} 条已拒绝")
+
+    st.divider()
+
+    # ── 筛选 ──
+    filter_cols = st.columns([2, 1])
+    with filter_cols[0]:
+        status_options = ["全部"] + [
+            f"{STATUS_CONFIG[s][0]} {STATUS_CONFIG[s][1]}" for s in STATUS_ORDER
+            if any(j.get("status") == s for j in demo_jobs)
+        ]
+        status_filter = st.selectbox("按状态筛选", status_options, label_visibility="collapsed")
+    with filter_cols[1]:
+        show_rejected = st.checkbox("显示已拒绝", value=True)
+
+    # ── 岗位卡片 ──
+    for status_group in STATUS_ORDER:
+        group_jobs = [
+            j for j in demo_jobs
+            if j.get("status") == status_group
+            and (show_rejected or status_group != "rejected")
+            and (
+                status_filter == "全部"
+                or STATUS_CONFIG.get(status_group, ("", ""))[1] in status_filter
+            )
+        ]
+        if not group_jobs:
+            continue
+
+        icon, label, color = STATUS_CONFIG.get(status_group, ("", status_group, "#666"))
+        st.markdown(f"### {icon} {label} ({len(group_jobs)})")
+
+        for job in group_jobs:
+            score = job.get("match_score", 0)
+            tier = get_company_tier(job.get("company", ""))
+            platform_label = PLATFORM_NAME.get(job.get("platform", ""), "")
+            salary = job.get("salary") or "薪资面议"
+
+            header = (
+                f"{score_color(score)} **{score:.0f} 分** ｜ "
+                f"{job.get('title', '')} @ **{job.get('company', '')}** "
+                f"（{TIER_BADGE.get(tier, tier)}）｜ "
+                f"{job.get('location', '')} ｜ {salary} ｜ {platform_label}"
+            )
+            with st.expander(header, expanded=(status_group in ("offer", "final_interview"))):
+                tl_col, info_col = st.columns([2, 3])
+
+                with tl_col:
+                    timeline = job.get("timeline") or []
+                    if timeline:
+                        st.write("**📅 投递时间线**")
+                        for event in timeline:
+                            tl_icon = TIMELINE_ICONS.get(event.get("status", ""), "•")
+                            note = f" — {event['note']}" if event.get("note") else ""
+                            st.write(
+                                f"`{event['date']}` {tl_icon} **{event['status']}**{note}"
+                            )
+                    else:
+                        st.caption("暂未投递")
+
+                with info_col:
+                    if job.get("match_reason"):
+                        st.info(f"💡 {job['match_reason']}")
+
+                    highlights = job.get("match_highlights") or []
+                    if highlights:
+                        st.write("**✅ 匹配优势**")
+                        for h in highlights:
+                            st.write(f"- {h}")
+
+                    concerns = job.get("match_concerns") or []
+                    if concerns:
+                        st.write("**⚠️ 待补强**")
+                        for c in concerns:
+                            st.write(f"- {c}")
+
+                    if job.get("url"):
+                        st.link_button("🔗 查看原岗位", job["url"])
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Tab 4：项目说明
+# ────────────────────────────────────────────────────────────────────────────────
+with tab4:
     st.subheader("ℹ️ 项目说明")
     st.markdown("""
 ### 问题背景
@@ -315,14 +463,15 @@ with tab3:
 
 | 模块 | 功能 | 技术实现 |
 |---|---|---|
-| **岗位匹配智能体** | 对每条岗位评分（0-100）+ 匹配原因 + 亮点 + 风险 | DeepSeek 多轮评分 |
-| **简历诊断智能体** | 针对具体岗位给出可操作的简历改写建议 | DeepSeek 结构化输出 |
+| **岗位匹配智能体** | 对每条岗位评分（0-100）+ 匹配原因 + 亮点 + 风险点 | DeepSeek 结构化输出 |
+| **简历诊断智能体** | 针对具体岗位给出可操作的简历改写建议 | DeepSeek 多维度分析 |
 
 ### 数据说明
 
 - 129 条真实岗位数据，来源：Boss直聘 + 实习僧（Playwright 自动爬取）
 - 涵盖数据运营、策略运营、数据分析等方向
 - 覆盖北上广深成等主要城市，大/中/小厂均有
+- 「投递追踪」模块含 18 条演示数据，覆盖从待投递到 Offer 的完整求职漏斗
 
 ### AI 工具选型
 
@@ -347,5 +496,5 @@ with tab3:
 | 版本 | 变化 |
 |---|---|
 | v1 | FastAPI + 原生 JS，支持真实爬虫自动投递 |
-| v2（当前）| Streamlit 重写前端，新增简历诊断模块，部署至公网 |
+| v2（当前）| Streamlit 重写，新增简历诊断 + 投递追踪模块，部署至公网 |
 """)
