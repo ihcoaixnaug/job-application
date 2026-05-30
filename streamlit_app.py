@@ -178,7 +178,7 @@ with st.sidebar:
     if st.session_state.api_key:
         st.success("✅ API Key 已配置")
     else:
-        st.warning("⚠️ 未配置 API Key，将展示预计算结果")
+        st.warning("⚠️ 未配置 API Key，将展示示例匹配分数")
 
     st.divider()
 
@@ -222,14 +222,6 @@ with st.sidebar:
             "公司规模", ["大厂", "中厂", "小厂"],
             default=["大厂", "中厂", "小厂"],
         )
-    # 高级筛选收起时使用默认值
-    if "min_score" not in dir():
-        min_score = 60
-    if "platforms" not in dir():
-        platforms = ["boss", "shixiseng"]
-    if "tiers" not in dir():
-        tiers = ["大厂", "中厂", "小厂"]
-
     st.divider()
     if st.button("🤖 AI 重新匹配", type="primary", use_container_width=True):
         if not st.session_state.resume_text:
@@ -333,8 +325,6 @@ with tab1:
             f"{job.get('location', '')} ｜ {salary}"
         )
         with st.expander(header, expanded=False):
-            st.progress(int(score) / 100, text=f"匹配度 {score:.0f}%")
-
             col_l, col_r = st.columns([3, 2])
             with col_l:
                 if job.get("match_reason"):
@@ -509,7 +499,7 @@ with tab3:
 
     # ── 4 个关键指标（去掉低频状态） ──
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("📤 已投递", sum(counts.get(s, 0) for s in ["applied", "viewed", "chatting"]))
+    k1.metric("📤 已投递", sum(counts.get(s, 0) for s in ["applied", "viewed", "chatting", "interview", "final_interview", "waiting", "offer"]))
     k2.metric("💬 面试中", sum(counts.get(s, 0) for s in ["interview", "final_interview"]))
     k3.metric("⏳ 等待结果", counts.get("waiting", 0))
     k4.metric("🎉 Offer", counts.get("offer", 0))
@@ -534,7 +524,7 @@ with tab3:
         for s in STATUS_ORDER
         if any(j.get("status") == s for j in demo_jobs)
     ]
-    status_filter = st.selectbox("按状态筛选", status_options, label_visibility="collapsed")
+    status_filter = st.selectbox("按状态筛选", status_options)
 
     # ── 岗位卡片 ──
     for status_group in STATUS_ORDER:
