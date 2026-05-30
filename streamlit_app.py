@@ -44,6 +44,19 @@ def load_demo_timeline_jobs() -> list[dict]:
         return json.load(f)
 
 
+# ── 工具函数（在 session state 之前定义）────────────────────────────────────────
+def _read_secret(key: str) -> str:
+    try:
+        return st.secrets[key]
+    except Exception:
+        return os.environ.get(key, "")
+
+
+def set_api_key(key: str):
+    st.session_state.api_key = key
+    os.environ["OPENROUTER_API_KEY"] = key
+
+
 # ── Session state 初始化 ────────────────────────────────────────────────────────
 def _init_state():
     defaults = {
@@ -92,18 +105,6 @@ def score_color(score: float) -> str:
     if score >= 65:
         return "🟡"
     return "🔴"
-
-
-def _read_secret(key: str) -> str:
-    try:
-        return st.secrets[key]
-    except Exception:
-        return os.environ.get(key, "")
-
-
-def set_api_key(key: str):
-    st.session_state.api_key = key
-    os.environ["OPENROUTER_API_KEY"] = key
 
 
 # ── 侧边栏 ──────────────────────────────────────────────────────────────────────
