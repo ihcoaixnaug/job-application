@@ -49,10 +49,7 @@ def _init_state():
     defaults = {
         "resume_text": "",
         "matched_jobs": None,
-        "api_key": (
-            st.secrets.get("OPENROUTER_API_KEY", "")
-            if hasattr(st, "secrets") else ""
-        ) or os.environ.get("OPENROUTER_API_KEY", ""),
+        "api_key": _read_secret("OPENROUTER_API_KEY"),
         "preferences": "数据运营/策略运营/数据分析",
         "diagnosis_result": None,
         "diagnosis_job_id": None,
@@ -95,6 +92,13 @@ def score_color(score: float) -> str:
     if score >= 65:
         return "🟡"
     return "🔴"
+
+
+def _read_secret(key: str) -> str:
+    try:
+        return st.secrets[key]
+    except Exception:
+        return os.environ.get(key, "")
 
 
 def set_api_key(key: str):
