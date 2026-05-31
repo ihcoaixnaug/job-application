@@ -12,7 +12,7 @@ import streamlit as st
 from company_tiers import get_company_tier
 from matcher import diagnose_resume, generate_greeting, generate_interview_prep, match_jobs
 from resume_parser import parse_docx
-from tracker import STATUS_LABELS, get_all_jobs as get_tracking_jobs, update_status
+from tracker import get_all_jobs as get_tracking_jobs, update_status
 
 # ── 示例简历（一键体验用）────────────────────────────────────────────────────────
 SAMPLE_RESUME = """教育背景
@@ -229,6 +229,16 @@ with st.sidebar:
             "公司规模", ["大厂", "中厂", "小厂"],
             default=["大厂", "中厂", "小厂"],
         )
+        _all_cities = sorted(set(
+            j.get("location", "").split("-")[0].strip()
+            for j in load_jobs()
+            if j.get("location", "").strip()
+        ))
+        cities_filter = st.multiselect("城市", _all_cities, default=_all_cities)
+        sort_by = st.selectbox(
+            "排序方式",
+            ["匹配分（高→低）", "公司规模（大厂优先）", "城市"],
+        )
     st.divider()
     if st.button("🤖 AI 重新匹配", type="primary", use_container_width=True):
         if not st.session_state.resume_text:
@@ -268,24 +278,34 @@ tab1, tab2, tab3, tab4 = st.tabs([
 with tab1:
     all_jobs = st.session_state.matched_jobs or load_jobs()
 
-    filtered = sorted(
-        [
-            j for j in all_jobs
-            if j.get("match_score", 0) >= min_score
-            and j.get("platform") in platforms
-            and get_company_tier(j.get("company", "")) in tiers
-        ],
-        key=lambda x: x.get("match_score", 0),
-        reverse=True,
-    )
+    _TIER_ORDER = {"大厂": 0, "中厂": 1, "小厂": 2}
+    _pool = [
+        j for j in all_jobs
+        if j.get("match_score", 0) >= min_score
+        and j.get("platform") in platforms
+        and get_company_tier(j.get("company", "")) in tiers
+        and j.get("location", "").split("-")[0].strip() in cities_filter
+    ]
+    if sort_by == "匹配分（高→低）":
+        filtered = sorted(_pool, key=lambda x: x.get("match_score", 0), reverse=True)
+    elif sort_by == "公司规模（大厂优先）":
+        filtered = sorted(_pool, key=lambda x: (
+            _TIER_ORDER.get(get_company_tier(x.get("company", "")), 3),
+            -x.get("match_score", 0),
+        ))
+    else:  # 城市
+        filtered = sorted(_pool, key=lambda x: (
+            x.get("location", "").split("-")[0],
+            -x.get("match_score", 0),
+        ))
 
     # ── 概览指标 ──
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("📋 匹配岗位", len(filtered))
     c2.metric("🌟 高匹配 ≥80分", sum(1 for j in filtered if j.get("match_score", 0) >= 80))
     c3.metric("🏆 大厂机会", sum(1 for j in filtered if get_company_tier(j.get("company", "")) == "大厂"))
-    cities = {j.get("location", "").split("-")[0] for j in filtered if j.get("location")}
-    c4.metric("📍 覆盖城市", len(cities))
+    _vis_cities = {j.get("location", "").split("-")[0] for j in filtered if j.get("location")}
+    c4.metric("📍 覆盖城市", len(_vis_cities))
 
     # ── 策略洞察（默认折叠，不遮挡岗位列表）──
     with st.expander("🧠 求职策略洞察", expanded=False):
@@ -500,16 +520,50 @@ with tab2:
 
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Tab 3：投递进度追踪（SQLite 后端，状态可编辑）
+# Tab 3：投递进度看板（SQLite 后端 · 拖拽式更新）
 # ────────────────────────────────────────────────────────────────────────────────
+
+# 看板列定义（icon, 标题, 包含的 status 列表, 左边框色）
+_KANBAN_STAGES = [
+    ("📋", "待投递",    ["pending"],                            "#9CA3AF"),
+    ("📤", "已投递",    ["applied", "viewed"],                  "#60A5FA"),
+    ("💬", "面试中",    ["chatting", "interview"],              "#34D399"),
+    ("🔥", "终面·等待", ["final_interview", "waiting"],         "#F97316"),
+    ("🎉", "Offer",    ["offer"],                              "#10B981"),
+]
+
+@st.dialog("📅 投递时间线")
+def _show_timeline(job: dict):
+    st.markdown(f"**{job.get('company', '')}** · {job.get('title', '')}")
+    st.caption(f"{score_color(job.get('match_score', 0))} {job.get('match_score', 0):.0f}分 · {job.get('salary') or '薪资面议'}")
+    st.divider()
+    timeline = job.get("timeline") or []
+    if timeline:
+        for ev in timeline:
+            tl_icon = TIMELINE_ICONS.get(ev.get("status", ""), "•")
+            note_str = f" — {ev['note']}" if ev.get("note") else ""
+            st.write(f"`{ev['date']}` {tl_icon} **{ev['status']}**{note_str}")
+    else:
+        st.info("暂无时间线记录")
+    if job.get("match_reason"):
+        st.divider()
+        st.info(f"💡 {job['match_reason']}")
+
+
+def _move_job(job_uid: str, old_status: str):
+    """on_change 回调：检测到状态变化后立即写入 DB。"""
+    new_s = st.session_state.get(f"kb_{job_uid}")
+    if new_s and new_s != old_status:
+        update_status(job_uid, new_s, "")
+
+
 with tab3:
-    # 每次从 DB 读取（不缓存，保证更新后立即可见）
-    track_jobs = get_tracking_jobs()
+    track_jobs = get_tracking_jobs()  # 每次从 DB 读取，确保即时更新
     counts = {s: sum(1 for j in track_jobs if j.get("status") == s) for s in STATUS_ORDER}
 
     st.subheader("📈 投递进度追踪")
 
-    # ── 4 个关键指标 ──
+    # ── 关键指标 ──
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("📤 已投递", sum(counts.get(s, 0) for s in ["applied", "viewed", "chatting", "interview", "final_interview", "waiting", "offer"]))
     k2.metric("💬 面试中", sum(counts.get(s, 0) for s in ["interview", "final_interview"]))
@@ -517,105 +571,103 @@ with tab3:
     k4.metric("🎉 Offer", counts.get("offer", 0))
 
     # ── 漏斗进度条 ──
-    funnel_steps = [
-        ("📤 已投递",  sum(counts.get(s, 0) for s in ["applied", "viewed", "chatting", "interview", "final_interview", "waiting", "offer"])),
-        ("💬 进入面试", sum(counts.get(s, 0) for s in ["interview", "final_interview", "waiting", "offer"])),
-        ("⏳ 等待结果", sum(counts.get(s, 0) for s in ["waiting", "offer"])),
+    _funnel = [
+        ("📤 已投递",   sum(counts.get(s, 0) for s in ["applied", "viewed", "chatting", "interview", "final_interview", "waiting", "offer"])),
+        ("💬 进入面试",  sum(counts.get(s, 0) for s in ["interview", "final_interview", "waiting", "offer"])),
+        ("⏳ 等待结果",  sum(counts.get(s, 0) for s in ["waiting", "offer"])),
         ("🎉 获得 Offer", counts.get("offer", 0)),
     ]
-    base = funnel_steps[0][1] or 1
-    for f_label, f_val in funnel_steps:
-        st.columns([3, 1])[0].progress(f_val / base, text=f"{f_label}  {f_val} 条")
+    _base = _funnel[0][1] or 1
+    for _fl, _fv in _funnel:
+        st.columns([3, 1])[0].progress(_fv / _base, text=f"{_fl}  {_fv} 条")
 
     st.divider()
 
-    # ── 状态筛选 ──
-    status_options = ["全部（含已拒绝）", "全部（不含已拒绝）"] + [
-        f"{STATUS_CONFIG[s][0]} {STATUS_CONFIG[s][1]}"
-        for s in STATUS_ORDER
-        if any(j.get("status") == s for j in track_jobs)
-    ]
-    status_filter = st.selectbox("按状态筛选", status_options)
+    # ── 看板（5 列）──
+    # 卡片 CSS：左色条 + 圆角阴影
+    st.markdown("""
+    <style>
+    .kb-card {
+        background: #fff;
+        border-radius: 8px;
+        border: 1px solid #e5e7eb;
+        padding: 10px 12px 6px;
+        margin-bottom: 10px;
+        box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    .kb-company { font-weight: 700; font-size: .88em; color: #134E4A; }
+    .kb-title   { font-size: .8em; color: #6B7280; margin: 2px 0; }
+    .kb-meta    { font-size: .74em; color: #9CA3AF; }
+    </style>
+    """, unsafe_allow_html=True)
 
-    # ── 岗位卡片（可编辑状态）──
-    for status_group in STATUS_ORDER:
-        if status_filter == "全部（不含已拒绝）" and status_group == "rejected":
-            continue
-        if status_filter not in ("全部（含已拒绝）", "全部（不含已拒绝）"):
-            if STATUS_CONFIG.get(status_group, ("", ""))[1] not in status_filter:
-                continue
-
-        group_jobs = [j for j in track_jobs if j.get("status") == status_group]
-        if not group_jobs:
-            continue
-
-        icon, label = STATUS_CONFIG.get(status_group, ("", status_group))
-        st.markdown(f"### {icon} {label} ({len(group_jobs)})")
-
-        for job in group_jobs:
-            score = job.get("match_score", 0)
-            tier = get_company_tier(job.get("company", ""))
-            salary = job.get("salary") or "薪资面议"
-            job_uid = str(job.get("job_id", ""))
-
-            header = (
-                f"{score_color(score)} **{score:.0f} 分** ｜ "
-                f"{job.get('title', '')} @ **{job.get('company', '')}** "
-                f"（{TIER_BADGE.get(tier, tier)}）｜ "
-                f"{job.get('location', '')} ｜ {salary}"
+    kb_cols = st.columns(len(_KANBAN_STAGES))
+    for col_obj, (icon, stage_lbl, stage_statuses, col_color) in zip(kb_cols, _KANBAN_STAGES):
+        stage_jobs = [j for j in track_jobs if j.get("status") in stage_statuses]
+        with col_obj:
+            # 列标题 + 色条
+            st.markdown(
+                f"**{icon} {stage_lbl}** <span style='color:#9CA3AF;font-size:.85em'>({len(stage_jobs)})</span>",
+                unsafe_allow_html=True,
             )
-            with st.expander(header, expanded=(status_group in ("offer", "final_interview"))):
-                tl_col, info_col = st.columns([2, 3])
+            st.markdown(
+                f'<div style="height:3px;background:{col_color};border-radius:2px;margin-bottom:10px"></div>',
+                unsafe_allow_html=True,
+            )
+            for job in stage_jobs:
+                job_uid = str(job["job_id"])
+                score   = job.get("match_score", 0)
+                tier    = get_company_tier(job.get("company", ""))
+                city    = (job.get("location") or "").split("-")[0]
+                cur_st  = job.get("status", "pending")
+                tier_colors = {"大厂": "#F97316", "中厂": "#0D9488", "小厂": "#9CA3AF"}
+                card_border = tier_colors.get(tier, "#9CA3AF")
 
-                with tl_col:
-                    # 时间线
-                    timeline = job.get("timeline") or []
-                    if timeline:
-                        st.write("**📅 投递时间线**")
-                        for event in timeline:
-                            tl_icon = TIMELINE_ICONS.get(event.get("status", ""), "•")
-                            note_str = f" — {event['note']}" if event.get("note") else ""
-                            st.write(f"`{event['date']}` {tl_icon} **{event['status']}**{note_str}")
-                    else:
-                        st.caption("暂未投递")
+                # 卡片 HTML
+                st.markdown(
+                    f'<div class="kb-card" style="border-left:4px solid {card_border}">'
+                    f'<div class="kb-company">{job.get("company","")}</div>'
+                    f'<div class="kb-title">{job.get("title","")}</div>'
+                    f'<div class="kb-meta">{score_color(score)} {score:.0f}分 · {city} · {TIER_BADGE.get(tier, tier)}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                # 移至下拉（on_change 直接保存）
+                st.selectbox(
+                    "移至",
+                    options=STATUS_ORDER,
+                    index=STATUS_ORDER.index(cur_st) if cur_st in STATUS_ORDER else 0,
+                    format_func=lambda s: f"{STATUS_CONFIG[s][0]} {STATUS_CONFIG[s][1]}",
+                    key=f"kb_{job_uid}",
+                    label_visibility="collapsed",
+                    on_change=_move_job,
+                    args=(job_uid, cur_st),
+                )
+                # 查看时间线按钮
+                if st.button("📋 时间线", key=f"tl_{job_uid}", use_container_width=True):
+                    _show_timeline(job)
 
-                    # ── 状态编辑控件 ──
-                    st.write("---")
-                    st.write("**✏️ 更新进度**")
-                    cur_idx = STATUS_ORDER.index(status_group) if status_group in STATUS_ORDER else 0
-                    new_status = st.selectbox(
-                        "新状态",
-                        options=STATUS_ORDER,
-                        index=cur_idx,
-                        format_func=lambda s: f"{STATUS_CONFIG[s][0]} {STATUS_CONFIG[s][1]}",
-                        key=f"sel_{job_uid}",
-                        label_visibility="collapsed",
-                    )
-                    note_input = st.text_input(
-                        "备注（可选）",
-                        placeholder="如：面试定于周三下午",
-                        key=f"note_{job_uid}",
-                    )
-                    if st.button("✅ 保存进度", key=f"save_{job_uid}", type="primary"):
-                        update_status(job_uid, new_status, note_input)
-                        st.success("进度已更新！")
-                        st.rerun()
-
-                with info_col:
-                    if job.get("match_reason"):
-                        st.info(f"💡 {job['match_reason']}")
-                    highlights = job.get("match_highlights") or []
-                    if highlights:
-                        st.write("**✅ 匹配优势**")
-                        for h in highlights:
-                            st.write(f"- {h}")
-                    concerns = job.get("match_concerns") or []
-                    if concerns:
-                        st.write("**⚠️ 待补强**")
-                        for c in concerns:
-                            st.write(f"- {c}")
-                    if job.get("url"):
-                        st.link_button("🔗 查看原岗位", job["url"])
+    # ── 已拒绝（折叠）──
+    rejected_jobs = [j for j in track_jobs if j.get("status") == "rejected"]
+    if rejected_jobs:
+        st.divider()
+        with st.expander(f"❌ 已拒绝 ({len(rejected_jobs)})", expanded=False):
+            for job in rejected_jobs:
+                job_uid = str(job["job_id"])
+                cur_st  = job.get("status", "rejected")
+                score   = job.get("match_score", 0)
+                city    = (job.get("location") or "").split("-")[0]
+                st.markdown(f"**{job.get('company','')}** · {job.get('title','')} · {score_color(score)}{score:.0f}分 · {city}")
+                st.selectbox(
+                    "移至",
+                    options=STATUS_ORDER,
+                    index=STATUS_ORDER.index(cur_st) if cur_st in STATUS_ORDER else 0,
+                    format_func=lambda s: f"{STATUS_CONFIG[s][0]} {STATUS_CONFIG[s][1]}",
+                    key=f"kb_{job_uid}",
+                    label_visibility="collapsed",
+                    on_change=_move_job,
+                    args=(job_uid, cur_st),
+                )
 
 
 # ────────────────────────────────────────────────────────────────────────────────
