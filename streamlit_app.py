@@ -104,6 +104,39 @@ st.markdown("""
 /* 按钮行与卡片之间紧贴 */
 div[data-testid="stMarkdownContainer"]+div[data-testid="stHorizontalBlock"]{margin-top:-4px}
 div[data-testid="stHorizontalBlock"]+div[data-testid="stMarkdownContainer"]{margin-top:4px}
+
+/* ── 整体页面背景（浅灰，与参考一致）── */
+.stApp{background:#F5F7FA}
+section[data-testid="stSidebar"]>div:first-child{background:#F0F4F8;padding-top:1.2rem}
+
+/* ── 侧边栏分区卡片感 ── */
+section[data-testid="stSidebar"] .stTextInput>div,
+section[data-testid="stSidebar"] .stFileUploader>div,
+section[data-testid="stSidebar"] .stSelectbox>div{
+    background:#fff;border-radius:8px}
+section[data-testid="stSidebar"] h3{
+    font-size:.9rem!important;font-weight:700;color:#134E4A;
+    border-left:3px solid #0D9488;padding-left:8px;margin:14px 0 6px}
+
+/* ── 主内容区（Tab 区域）白色卡片感 ── */
+div[data-testid="stTabs"] > div:last-child{
+    background:#fff;border-radius:12px;
+    padding:16px 20px;
+    box-shadow:0 1px 6px rgba(0,0,0,.06)}
+
+/* ── 按钮样式 ── */
+button[kind="primary"]{border-radius:6px!important;font-weight:600!important}
+button[kind="secondary"]{border-radius:6px!important;border-color:#e5e7eb!important;
+    color:#374151!important;font-weight:500!important}
+button[kind="secondary"]:hover{background:#f9fafb!important;border-color:#0D9488!important}
+
+/* ── 指标卡 ── */
+div[data-testid="stMetric"]{
+    background:#fff;border-radius:8px;padding:10px 14px;
+    box-shadow:0 1px 3px rgba(0,0,0,.06);border:1px solid #e5e7eb}
+
+/* ── Tab 标签 ── */
+button[data-baseweb="tab"]{font-weight:600!important;font-size:.88rem!important}
 </style>
 """, unsafe_allow_html=True)
 
@@ -261,19 +294,25 @@ TIMELINE_ICONS = {
 
 # ── 侧边栏 ──────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    # API Key
-    api_key_input = st.text_input(
-        "OpenRouter API Key",
-        value=st.session_state.api_key,
-        type="password",
-        help="在 openrouter.ai 免费注册获取，支持 DeepSeek / Claude / GPT 等模型",
-    )
-    if api_key_input != st.session_state.api_key:
-        set_api_key(api_key_input)
+    # API Key：配置后只显示状态，不再回显密钥
     if st.session_state.api_key:
-        st.success("✅ API Key 已配置")
+        col_ok, col_rst = st.columns([3, 1])
+        col_ok.success("✅ API Key 已配置")
+        if col_rst.button("重置", key="reset_api"):
+            set_api_key("")
+            st.rerun()
     else:
-        st.warning("⚠️ 未配置 API Key，将展示示例匹配分数")
+        api_key_input = st.text_input(
+            "OpenRouter API Key",
+            value="",
+            type="password",
+            placeholder="sk-or-v1-...",
+            help="在 openrouter.ai 免费注册获取，支持 DeepSeek / Claude / GPT 等模型",
+        )
+        if api_key_input:
+            set_api_key(api_key_input)
+            st.rerun()
+        st.caption("⚠️ 未配置，将展示示例匹配分数")
 
     st.divider()
 
