@@ -93,88 +93,195 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── 全局卡片 CSS（对标参考设计）────────────────────────────────────────────────────
+# ── 全局样式 ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* 卡片容器 */
-.jc{background:#fff;border:1px solid #e5e7eb;border-radius:10px;
-    padding:12px 14px 10px;margin:0 0 6px;
-    box-shadow:0 1px 4px rgba(0,0,0,.07);font-family:-apple-system,sans-serif}
-/* 标题行 */
-.jc-hd{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
-.jc-title{font-weight:700;font-size:.94em;color:#111827;flex:1}
-.jc-score{font-weight:800;font-size:1.2em;white-space:nowrap}
-.sc-hi{color:#10b981}.sc-mid{color:#f59e0b}.sc-lo{color:#ef4444}
-/* 元信息行 */
-.jc-meta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;
-         margin-top:4px;font-size:.79em;color:#6b7280}
-/* 分数进度条 */
-.jc-bar-bg{height:4px;background:#e5e7eb;border-radius:2px;margin:6px 0;overflow:hidden}
-.jc-bar{height:100%;border-radius:2px}
-.bar-hi{background:linear-gradient(90deg,#10b981,#6ee7b7)}
-.bar-mid{background:linear-gradient(90deg,#f59e0b,#fcd34d)}
-.bar-lo{background:linear-gradient(90deg,#ef4444,#fca5a5)}
-/* 匹配胶囊 */
-.jc-pills{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
-.jp{font-size:.73em;padding:2px 8px;border-radius:12px}
-.jp-pos{background:#dcfce7;color:#15803d}
-.jp-neg{background:#fff7ed;color:#c2410c}
-.jp-tip{background:#eff6ff;color:#1d4ed8}
-/* 徽章 */
-.bd{display:inline-block;font-size:.71em;padding:1px 6px;border-radius:4px;
-    font-weight:600;line-height:1.6;vertical-align:middle}
-.bd-big{background:#fef3c7;color:#d97706}
-.bd-mid{background:#d1fae5;color:#059669}
-.bd-sml{background:#f3f4f6;color:#6b7280}
-.bd-boss{background:#1e293b;color:#fff}
-.bd-shix{background:#0ea5e9;color:#fff}
-/* 看板紧凑卡片 —— 独立 class，避免影响 Tab1 全卡片 */
-.jc-compact{min-height:140px;display:flex;flex-direction:column}
-.jc-compact .jc-pills{flex:1;align-content:flex-start}
-/* 看板列头 */
-.kb-hd{font-weight:700;font-size:.9em;display:flex;align-items:center;gap:6px;
-       margin-bottom:4px}
-.kb-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
-.kb-cnt{background:#f3f4f6;color:#6b7280;font-size:.78em;
-        padding:1px 7px;border-radius:10px;font-weight:600}
-/* 看板列色条 */
-.kb-rule{height:3px;border-radius:2px;margin-bottom:10px}
-/* 按钮行与卡片之间紧贴 */
-div[data-testid="stMarkdownContainer"]+div[data-testid="stHorizontalBlock"]{margin-top:-4px}
-div[data-testid="stHorizontalBlock"]+div[data-testid="stMarkdownContainer"]{margin-top:4px}
+/* ══════════════════════════════════════════════════════
+   全局字体 & 基础排版
+   Inter 优先；中文回退 PingFang SC / 微软雅黑
+   ══════════════════════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-/* ── 整体页面背景（浅灰，与参考一致）── */
-.stApp{background:#F5F7FA}
-section[data-testid="stSidebar"]>div:first-child{background:#F0F4F8;padding-top:1.2rem}
+html, body, [class*="css"], .stApp, .stMarkdown {
+    font-family: "Inter", -apple-system, BlinkMacSystemFont,
+                 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+                 sans-serif !important;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
 
-/* ── 侧边栏分区卡片感 ── */
-section[data-testid="stSidebar"] .stTextInput>div,
-section[data-testid="stSidebar"] .stFileUploader>div,
-section[data-testid="stSidebar"] .stSelectbox>div{
-    background:#fff;border-radius:8px}
-section[data-testid="stSidebar"] h3{
-    font-size:.9rem!important;font-weight:700;color:#134E4A;
-    border-left:3px solid #0D9488;padding-left:8px;margin:14px 0 6px}
+/* ── 标题层级：缩小 h1，统一其余 ── */
+h1 {
+    font-size: 1.65rem !important;
+    font-weight: 800 !important;
+    letter-spacing: -0.02em !important;
+    line-height: 1.25 !important;
+    color: #111827 !important;
+}
+h2 {
+    font-size: 1.1rem !important;
+    font-weight: 700 !important;
+    color: #1f2937 !important;
+}
+h3 {
+    font-size: 0.95rem !important;
+    font-weight: 700 !important;
+    color: #1f2937 !important;
+}
 
-/* ── 主内容区（Tab 区域）白色卡片感 ── */
-div[data-testid="stTabs"] > div:last-child{
-    background:#fff;border-radius:12px;
-    padding:16px 20px;
-    box-shadow:0 1px 6px rgba(0,0,0,.06)}
+/* ── 正文 ── */
+p, li, .stMarkdown p {
+    font-size: 0.9rem !important;
+    line-height: 1.7 !important;
+    color: #374151;
+}
 
-/* ── 按钮样式 ── */
-button[kind="primary"]{border-radius:6px!important;font-weight:600!important}
-button[kind="secondary"]{border-radius:6px!important;border-color:#e5e7eb!important;
-    color:#374151!important;font-weight:500!important}
-button[kind="secondary"]:hover{background:#f9fafb!important;border-color:#0D9488!important}
+/* ── caption / 小字说明 ── */
+[data-testid="stCaptionContainer"] p,
+small, .caption {
+    font-size: 0.78rem !important;
+    color: #9ca3af !important;
+    line-height: 1.5 !important;
+}
 
-/* ── 指标卡 ── */
-div[data-testid="stMetric"]{
-    background:#fff;border-radius:8px;padding:10px 14px;
-    box-shadow:0 1px 3px rgba(0,0,0,.06);border:1px solid #e5e7eb}
+/* ── 指标卡数字 & 标签 ── */
+[data-testid="stMetricLabel"] > div {
+    font-size: 0.78rem !important;
+    font-weight: 600 !important;
+    color: #6b7280 !important;
+    letter-spacing: 0.01em;
+}
+[data-testid="stMetricValue"] > div {
+    font-size: 1.8rem !important;
+    font-weight: 800 !important;
+    color: #111827 !important;
+    letter-spacing: -0.02em;
+}
 
 /* ── Tab 标签 ── */
-button[data-baseweb="tab"]{font-weight:600!important;font-size:.88rem!important}
+button[data-baseweb="tab"] {
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.01em !important;
+}
+
+/* ── 按钮文字 ── */
+button[kind="primary"], button[kind="secondary"] {
+    font-size: 0.82rem !important;
+    font-weight: 600 !important;
+}
+
+/* ── selectbox / input / label ── */
+[data-testid="stSelectbox"] label,
+[data-testid="stTextInput"] label,
+[data-testid="stSlider"] label,
+[data-testid="stMultiSelect"] label,
+[data-testid="stFileUploader"] label {
+    font-size: 0.82rem !important;
+    font-weight: 600 !important;
+    color: #374151 !important;
+}
+[data-testid="stTextInput"] input,
+[data-testid="stSelectbox"] div[data-baseweb="select"] {
+    font-size: 0.88rem !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   岗位卡片
+   ══════════════════════════════════════════════════════ */
+.jc {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 12px 14px 10px;
+    margin: 0 0 6px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.07);
+}
+.jc-hd  { display:flex; justify-content:space-between; align-items:flex-start; gap:8px }
+.jc-title { font-weight:700; font-size:.93rem; color:#111827; flex:1; line-height:1.35 }
+.jc-score { font-weight:800; font-size:1.15rem; white-space:nowrap }
+.sc-hi{color:#10b981} .sc-mid{color:#f59e0b} .sc-lo{color:#ef4444}
+.jc-meta {
+    display:flex; align-items:center; gap:5px; flex-wrap:wrap;
+    margin-top:4px; font-size:.78rem; color:#6b7280; line-height:1.4;
+}
+.jc-bar-bg { height:4px; background:#e5e7eb; border-radius:2px; margin:7px 0; overflow:hidden }
+.jc-bar    { height:100%; border-radius:2px }
+.bar-hi  { background:linear-gradient(90deg,#10b981,#6ee7b7) }
+.bar-mid { background:linear-gradient(90deg,#f59e0b,#fcd34d) }
+.bar-lo  { background:linear-gradient(90deg,#ef4444,#fca5a5) }
+.jc-pills { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px }
+.jp       { font-size:.74rem; padding:2px 8px; border-radius:12px; line-height:1.5 }
+.jp-pos   { background:#dcfce7; color:#15803d }
+.jp-neg   { background:#fff7ed; color:#c2410c }
+.jp-tip   { background:#eff6ff; color:#1d4ed8 }
+
+/* ── 徽章 ── */
+.bd {
+    display:inline-block; font-size:.7rem; padding:1px 6px;
+    border-radius:4px; font-weight:600; line-height:1.6; vertical-align:middle;
+}
+.bd-big  { background:#fef3c7; color:#d97706 }
+.bd-mid  { background:#d1fae5; color:#059669 }
+.bd-sml  { background:#f3f4f6; color:#6b7280 }
+.bd-boss { background:#1e293b; color:#fff }
+.bd-shix { background:#0ea5e9; color:#fff }
+
+/* ── 看板紧凑卡片 ── */
+.jc-compact { min-height:140px; display:flex; flex-direction:column }
+.jc-compact .jc-pills { flex:1; align-content:flex-start }
+
+/* ── 看板列头 ── */
+.kb-hd  { font-weight:700; font-size:.82rem; display:flex; align-items:center; gap:6px; margin-bottom:4px }
+.kb-dot { width:9px; height:9px; border-radius:50%; display:inline-block }
+.kb-cnt { background:#f3f4f6; color:#6b7280; font-size:.74rem;
+          padding:1px 7px; border-radius:10px; font-weight:600 }
+.kb-rule{ height:3px; border-radius:2px; margin-bottom:10px }
+
+/* ── 按钮行间距 ── */
+div[data-testid="stMarkdownContainer"]+div[data-testid="stHorizontalBlock"]{ margin-top:-4px }
+div[data-testid="stHorizontalBlock"]+div[data-testid="stMarkdownContainer"]{ margin-top:4px }
+
+/* ══════════════════════════════════════════════════════
+   布局 & 结构
+   ══════════════════════════════════════════════════════ */
+.stApp { background:#F5F7FA }
+section[data-testid="stSidebar"] > div:first-child { background:#F0F4F8; padding-top:1.2rem }
+
+/* ── 侧边栏 ── */
+section[data-testid="stSidebar"] .stTextInput > div,
+section[data-testid="stSidebar"] .stFileUploader > div,
+section[data-testid="stSidebar"] .stSelectbox > div {
+    background:#fff; border-radius:8px;
+}
+section[data-testid="stSidebar"] h3 {
+    font-size: .88rem !important;
+    font-weight: 700;
+    color: #134E4A;
+    border-left: 3px solid #0D9488;
+    padding-left: 8px;
+    margin: 14px 0 6px;
+}
+
+/* ── 主内容 Tab 区域 ── */
+div[data-testid="stTabs"] > div:last-child {
+    background: #fff;
+    border-radius: 12px;
+    padding: 16px 20px;
+    box-shadow: 0 1px 6px rgba(0,0,0,.06);
+}
+
+/* ── 按钮样式 ── */
+button[kind="primary"]   { border-radius:6px!important }
+button[kind="secondary"] { border-radius:6px!important; border-color:#e5e7eb!important;
+                           color:#374151!important }
+button[kind="secondary"]:hover { background:#f9fafb!important; border-color:#0D9488!important }
+
+/* ── 指标卡容器 ── */
+div[data-testid="stMetric"] {
+    background:#fff; border-radius:8px; padding:10px 14px;
+    box-shadow:0 1px 3px rgba(0,0,0,.06); border:1px solid #e5e7eb;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -444,7 +551,13 @@ with st.sidebar:
 
 # ── 主内容区 ────────────────────────────────────────────────────────────────────
 st.title("🎯 AI 求职智能匹配助手")
-st.caption("基于 DeepSeek 大模型 · 129 条真实岗位 · 覆盖求职全链路：匹配 → 诊断 → 沟通 → 面试 → 追踪")
+st.markdown(
+    '<p style="margin-top:-10px;margin-bottom:4px;font-size:.88rem;color:#6b7280;line-height:1.6">'
+    '基于 DeepSeek 大模型 &nbsp;·&nbsp; 129 条真实岗位 &nbsp;·&nbsp; '
+    '覆盖求职全链路：匹配 → 诊断 → 沟通 → 面试 → 追踪'
+    '</p>',
+    unsafe_allow_html=True,
+)
 
 tab1, tab2, tab3, tab4 = st.tabs([
     "📊 岗位匹配看板",
