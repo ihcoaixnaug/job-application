@@ -58,6 +58,102 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── 全局卡片 CSS（对标参考设计）────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* 卡片容器 */
+.jc{background:#fff;border:1px solid #e5e7eb;border-radius:10px;
+    padding:12px 14px 10px;margin:0 0 6px;
+    box-shadow:0 1px 4px rgba(0,0,0,.07);font-family:-apple-system,sans-serif}
+/* 标题行 */
+.jc-hd{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.jc-title{font-weight:700;font-size:.94em;color:#111827;flex:1}
+.jc-score{font-weight:800;font-size:1.2em;white-space:nowrap}
+.sc-hi{color:#10b981}.sc-mid{color:#f59e0b}.sc-lo{color:#ef4444}
+/* 元信息行 */
+.jc-meta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;
+         margin-top:4px;font-size:.79em;color:#6b7280}
+/* 分数进度条 */
+.jc-bar-bg{height:4px;background:#e5e7eb;border-radius:2px;margin:6px 0;overflow:hidden}
+.jc-bar{height:100%;border-radius:2px}
+.bar-hi{background:linear-gradient(90deg,#10b981,#6ee7b7)}
+.bar-mid{background:linear-gradient(90deg,#f59e0b,#fcd34d)}
+.bar-lo{background:linear-gradient(90deg,#ef4444,#fca5a5)}
+/* 匹配胶囊 */
+.jc-pills{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.jp{font-size:.73em;padding:2px 8px;border-radius:12px}
+.jp-pos{background:#dcfce7;color:#15803d}
+.jp-neg{background:#fff7ed;color:#c2410c}
+.jp-tip{background:#eff6ff;color:#1d4ed8}
+/* 徽章 */
+.bd{display:inline-block;font-size:.71em;padding:1px 6px;border-radius:4px;
+    font-weight:600;line-height:1.6;vertical-align:middle}
+.bd-big{background:#fef3c7;color:#d97706}
+.bd-mid{background:#d1fae5;color:#059669}
+.bd-sml{background:#f3f4f6;color:#6b7280}
+.bd-boss{background:#1e293b;color:#fff}
+.bd-shix{background:#0ea5e9;color:#fff}
+/* 看板列头 */
+.kb-hd{font-weight:700;font-size:.9em;display:flex;align-items:center;gap:6px;
+       margin-bottom:4px}
+.kb-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.kb-cnt{background:#f3f4f6;color:#6b7280;font-size:.78em;
+        padding:1px 7px;border-radius:10px;font-weight:600}
+/* 看板列色条 */
+.kb-rule{height:3px;border-radius:2px;margin-bottom:10px}
+/* 按钮行与卡片之间紧贴 */
+div[data-testid="stMarkdownContainer"]+div[data-testid="stHorizontalBlock"]{margin-top:-4px}
+div[data-testid="stHorizontalBlock"]+div[data-testid="stMarkdownContainer"]{margin-top:4px}
+</style>
+""", unsafe_allow_html=True)
+
+# ── 卡片渲染辅助函数 ──────────────────────────────────────────────────────────────
+def _job_card(job: dict, compact: bool = False) -> str:
+    """生成岗位 HTML 卡片（与参考设计对标）。"""
+    score  = job.get("match_score", 0)
+    tier   = get_company_tier(job.get("company", ""))
+    plat   = job.get("platform", "")
+    salary = job.get("salary") or "薪资面议"
+    city   = (job.get("location") or "").split("-")[0]
+
+    tier_html = {"大厂": '<span class="bd bd-big">大厂</span>',
+                 "中厂": '<span class="bd bd-mid">中厂</span>',
+                 "小厂": '<span class="bd bd-sml">小厂</span>'}.get(tier, "")
+    plat_html = {"boss":      '<span class="bd bd-boss">Boss</span>',
+                 "shixiseng": '<span class="bd bd-shix">实习僧</span>'}.get(plat, "")
+
+    sc_cls  = "sc-hi" if score >= 80 else ("sc-mid" if score >= 65 else "sc-lo")
+    bar_cls = "bar-hi" if score >= 80 else ("bar-mid" if score >= 65 else "bar-lo")
+
+    highlights = (job.get("match_highlights") or [])[:3]
+    concerns   = (job.get("match_concerns")   or [])[:2]
+
+    if compact:
+        pills = "".join(f'<span class="jp jp-pos">✓ {h}</span>' for h in highlights[:2])
+        pills += "".join(f'<span class="jp jp-neg">△ {c}</span>' for c in concerns[:1])
+    else:
+        pills = "".join(f'<span class="jp jp-pos">✓ {h}</span>' for h in highlights)
+        pills += "".join(f'<span class="jp jp-neg">△ {c}</span>' for c in concerns)
+        if not highlights and not concerns and job.get("match_reason"):
+            pills = f'<span class="jp jp-tip">💡 {job["match_reason"][:50]}</span>'
+
+    return (
+        f'<div class="jc">'
+        f'<div class="jc-hd">'
+        f'<span class="jc-title">{job.get("title","")}</span>'
+        f'<span class="jc-score {sc_cls}">{score:.0f}</span>'
+        f'</div>'
+        f'<div class="jc-meta">'
+        f'<span>{job.get("company","")}</span>{tier_html}{plat_html}'
+        f'<span>·</span><span>{salary}</span>'
+        f'<span>·</span><span>{city}</span>'
+        f'</div>'
+        f'<div class="jc-bar-bg"><div class="jc-bar {bar_cls}" style="width:{score}%"></div></div>'
+        f'<div class="jc-pills">{pills}</div>'
+        f'</div>'
+    )
+
+
 # ── 数据加载 ────────────────────────────────────────────────────────────────────
 @st.cache_data
 def load_jobs() -> list[dict]:
@@ -342,65 +438,57 @@ with tab1:
     if not filtered:
         st.info("📭 未找到符合条件的岗位，请调整左侧的「最低匹配分」、「招聘平台」或「公司规模」筛选条件。")
 
-    # ── 岗位卡片 ──
+    # ── 岗位卡片（对标参考设计：直接展示，无 expander）──
     for job in filtered:
-        score = job.get("match_score", 0)
-        tier = get_company_tier(job.get("company", ""))
-        salary = job.get("salary") or "薪资面议"
         job_uid = str(job.get("job_id") or job.get("id", ""))
 
-        header = (
-            f"{score_color(score)} **{score:.0f} 分** ｜ "
-            f"{job.get('title', '')} @ **{job.get('company', '')}** "
-            f"（{TIER_BADGE.get(tier, tier)}）｜ "
-            f"{job.get('location', '')} ｜ {salary}"
-        )
-        with st.expander(header, expanded=False):
-            col_l, col_r = st.columns([3, 2])
-            with col_l:
-                if job.get("match_reason"):
-                    st.info(f"💡 {job['match_reason']}")
+        # HTML 卡片
+        st.markdown(_job_card(job, compact=False), unsafe_allow_html=True)
 
-                highlights = job.get("match_highlights") or []
-                if highlights:
-                    st.write("**✅ 匹配优势**")
-                    for h in highlights:
-                        st.write(f"- {h}")
+        # 操作按钮行（紧贴卡片底部）
+        existing_greeting = st.session_state.greetings.get(job_uid)
+        btn_c1, btn_c2, btn_c3, _ = st.columns([2, 2, 2, 4])
 
-                concerns = job.get("match_concerns") or []
-                if concerns:
-                    st.write("**⚠️ 待补强**")
-                    for c in concerns:
-                        st.write(f"- {c}")
+        with btn_c1:
+            if existing_greeting:
+                if st.button("📋 查看打招呼", key=f"show_g_{job_uid}", use_container_width=True):
+                    st.session_state[f"expand_g_{job_uid}"] = not st.session_state.get(f"expand_g_{job_uid}", False)
+            elif st.session_state.api_key:
+                if st.button("✨ AI 打招呼", key=f"btn_greet_{job_uid}", use_container_width=True):
+                    with st.spinner("生成中…"):
+                        greeting = asyncio.run(generate_greeting(
+                            st.session_state.resume_text or SAMPLE_RESUME,
+                            job,
+                            st.session_state.preferences,
+                        ))
+                    st.session_state.greetings[job_uid] = greeting
+                    st.rerun()
 
-                # 打招呼：只在有内容或 API Key 可用时显示
-                existing_greeting = st.session_state.greetings.get(job_uid)
-                if existing_greeting:
-                    st.write("**📨 打招呼文案**")
-                    st.text_area("", value=existing_greeting, height=80,
-                                 key=f"greeting_{job_uid}", label_visibility="collapsed")
-                elif st.session_state.api_key:
-                    if st.button("✨ AI 生成打招呼文案", key=f"btn_greet_{job_uid}"):
-                        with st.spinner("生成中…"):
-                            greeting = asyncio.run(generate_greeting(
-                                st.session_state.resume_text or SAMPLE_RESUME,
-                                job,
-                                st.session_state.preferences,
-                            ))
-                        st.session_state.greetings[job_uid] = greeting
-                        st.rerun()
+        with btn_c2:
+            if job.get("url"):
+                st.link_button("🔗 查看岗位", job["url"], use_container_width=True)
 
-            with col_r:
-                desc = job.get("description") or ""
-                req = job.get("requirements") or ""
+        with btn_c3:
+            desc = job.get("description") or ""
+            req  = job.get("requirements") or ""
+            if desc or req:
+                if st.button("📄 岗位详情", key=f"det_{job_uid}", use_container_width=True):
+                    st.session_state[f"expand_d_{job_uid}"] = not st.session_state.get(f"expand_d_{job_uid}", False)
+
+        # 可展开：打招呼文案
+        if existing_greeting and st.session_state.get(f"expand_g_{job_uid}"):
+            st.text_area("打招呼文案", value=existing_greeting, height=70,
+                         key=f"g_ta_{job_uid}", label_visibility="collapsed")
+
+        # 可展开：岗位详情
+        if st.session_state.get(f"expand_d_{job_uid}"):
+            desc = job.get("description") or ""
+            req  = job.get("requirements") or ""
+            with st.container():
                 if desc:
-                    st.write("**岗位描述**")
-                    st.write(desc[:250] + "…" if len(desc) > 250 else desc)
+                    st.caption(f"**岗位描述** {desc[:300]}{'…' if len(desc) > 300 else ''}")
                 if req:
-                    st.write("**岗位要求**")
-                    st.write(req[:200] + "…" if len(req) > 200 else req)
-                if job.get("url"):
-                    st.link_button("🔗 查看原岗位", job["url"])
+                    st.caption(f"**岗位要求** {req[:250]}{'…' if len(req) > 250 else ''}")
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -583,56 +671,29 @@ with tab3:
 
     st.divider()
 
-    # ── 看板（5 列）──
-    # 卡片 CSS：左色条 + 圆角阴影
-    st.markdown("""
-    <style>
-    .kb-card {
-        background: #fff;
-        border-radius: 8px;
-        border: 1px solid #e5e7eb;
-        padding: 10px 12px 6px;
-        margin-bottom: 10px;
-        box-shadow: 0 1px 3px rgba(0,0,0,.06);
-    }
-    .kb-company { font-weight: 700; font-size: .88em; color: #134E4A; }
-    .kb-title   { font-size: .8em; color: #6B7280; margin: 2px 0; }
-    .kb-meta    { font-size: .74em; color: #9CA3AF; }
-    </style>
-    """, unsafe_allow_html=True)
-
+    # ── 看板（5 列）── 使用统一 CSS 系统
     kb_cols = st.columns(len(_KANBAN_STAGES))
     for col_obj, (icon, stage_lbl, stage_statuses, col_color) in zip(kb_cols, _KANBAN_STAGES):
         stage_jobs = [j for j in track_jobs if j.get("status") in stage_statuses]
         with col_obj:
-            # 列标题 + 色条
+            # 列标题：圆点 + 名称 + 计数徽章
             st.markdown(
-                f"**{icon} {stage_lbl}** <span style='color:#9CA3AF;font-size:.85em'>({len(stage_jobs)})</span>",
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f'<div style="height:3px;background:{col_color};border-radius:2px;margin-bottom:10px"></div>',
+                f'<div class="kb-hd">'
+                f'<span class="kb-dot" style="background:{col_color}"></span>'
+                f'<span>{stage_lbl}</span>'
+                f'<span class="kb-cnt">{len(stage_jobs)}</span>'
+                f'</div>'
+                f'<div class="kb-rule" style="background:{col_color}"></div>',
                 unsafe_allow_html=True,
             )
             for job in stage_jobs:
                 job_uid = str(job["job_id"])
-                score   = job.get("match_score", 0)
-                tier    = get_company_tier(job.get("company", ""))
-                city    = (job.get("location") or "").split("-")[0]
                 cur_st  = job.get("status", "pending")
-                tier_colors = {"大厂": "#F97316", "中厂": "#0D9488", "小厂": "#9CA3AF"}
-                card_border = tier_colors.get(tier, "#9CA3AF")
 
-                # 卡片 HTML
-                st.markdown(
-                    f'<div class="kb-card" style="border-left:4px solid {card_border}">'
-                    f'<div class="kb-company">{job.get("company","")}</div>'
-                    f'<div class="kb-title">{job.get("title","")}</div>'
-                    f'<div class="kb-meta">{score_color(score)} {score:.0f}分 · {city} · {TIER_BADGE.get(tier, tier)}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-                # 移至下拉（on_change 直接保存）
+                # 紧凑版卡片（含分数条 + 匹配胶囊）
+                st.markdown(_job_card(job, compact=True), unsafe_allow_html=True)
+
+                # 移至下拉（on_change 直接保存 → 卡片即时跳列）
                 st.selectbox(
                     "移至",
                     options=STATUS_ORDER,
@@ -643,7 +704,6 @@ with tab3:
                     on_change=_move_job,
                     args=(job_uid, cur_st),
                 )
-                # 查看时间线按钮
                 if st.button("📋 时间线", key=f"tl_{job_uid}", use_container_width=True):
                     _show_timeline(job)
 
@@ -655,9 +715,7 @@ with tab3:
             for job in rejected_jobs:
                 job_uid = str(job["job_id"])
                 cur_st  = job.get("status", "rejected")
-                score   = job.get("match_score", 0)
-                city    = (job.get("location") or "").split("-")[0]
-                st.markdown(f"**{job.get('company','')}** · {job.get('title','')} · {score_color(score)}{score:.0f}分 · {city}")
+                st.markdown(_job_card(job, compact=True), unsafe_allow_html=True)
                 st.selectbox(
                     "移至",
                     options=STATUS_ORDER,
