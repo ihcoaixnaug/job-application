@@ -414,6 +414,7 @@ def _init_state():
         "greetings": {},
         "t1_page": 0,
         "_t1_sig": None,
+        "show_landing": True,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -444,6 +445,139 @@ TIMELINE_ICONS = {
     "一面": "💬", "二面": "💬", "终面": "🔥", "等待结果": "⏳",
     "offer": "🎉", "已拒绝": "❌", "沟通中": "💬",
 }
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Landing Page  —— 显示首页时隐藏侧边栏，st.stop() 阻止主app渲染
+# ────────────────────────────────────────────────────────────────────────────────
+if st.session_state.get("show_landing", True):
+    st.markdown("""
+    <style>
+    section[data-testid="stSidebar"]  { display:none!important }
+    header[data-testid="stHeader"]    { background:transparent!important }
+    .main .block-container            { max-width:860px!important;
+                                        padding:0 2rem 4rem!important;
+                                        margin:0 auto!important }
+    /* Landing-specific */
+    .lp-badge {
+        display:inline-block;background:#f0fdfa;color:#0D9488;
+        border:1px solid #a7f3d0;font-size:.72rem;font-weight:700;
+        padding:4px 14px;border-radius:20px;letter-spacing:.06em;text-transform:uppercase;
+    }
+    .lp-title {
+        font-size:2.8rem!important;font-weight:900!important;
+        color:#111827!important;letter-spacing:-.035em!important;
+        line-height:1.15!important;margin:16px 0 20px!important;
+    }
+    .lp-sub {
+        font-size:1.05rem!important;color:#6b7280!important;
+        line-height:1.8!important;max-width:560px!important;
+        margin:0 auto 8px!important;
+    }
+    .lp-feat-grid {
+        display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:36px 0 12px;
+    }
+    @media(max-width:640px){.lp-feat-grid{grid-template-columns:repeat(3,1fr)}}
+    .lp-feat {
+        background:#fff;border:1px solid #e5e7eb;border-radius:12px;
+        padding:20px 10px 16px;text-align:center;
+        box-shadow:0 1px 4px rgba(0,0,0,.05);
+    }
+    .lp-feat:hover { box-shadow:0 4px 14px rgba(13,148,136,.13);border-color:#6ee7b7 }
+    .lp-feat-icon  { font-size:1.7em;margin-bottom:8px }
+    .lp-feat-name  { font-size:.83rem!important;font-weight:700!important;
+                     color:#111827!important;margin-bottom:4px!important }
+    .lp-feat-desc  { font-size:.72rem!important;color:#9ca3af!important;line-height:1.45!important }
+    .lp-stats      { display:flex;justify-content:center;gap:56px;
+                     margin:32px 0 8px;flex-wrap:wrap }
+    .lp-stat-n     { font-size:2rem!important;font-weight:900!important;
+                     color:#0D9488!important;letter-spacing:-.03em!important }
+    .lp-stat-l     { font-size:.78rem!important;color:#9ca3af!important;margin-top:2px!important }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # ── Hero ──
+    st.markdown("""
+<div style="text-align:center;padding:72px 0 28px">
+  <div class="lp-badge">🎓 腾讯 AI × HR 训练营</div>
+  <div class="lp-title">🎯 AI 求职智能匹配助手</div>
+  <div class="lp-sub">
+    把 <strong style="color:#0D9488">129 条真实爬取岗位</strong>和你的简历交给 DeepSeek，<br>
+    秒级打分 · 简历诊断 · 生成打招呼文案 · 全程追踪投递进度
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── CTA 按钮 ──
+    _lc1, _lc2, _lsep, _lc3, _lr1 = st.columns([1.5, 2.2, 0.4, 2.2, 1.5])
+    with _lc2:
+        if st.button("🚀  开始使用", type="primary", use_container_width=True):
+            st.session_state.show_landing = False
+            st.rerun()
+    with _lc3:
+        if st.button("💡  用示例简历快速体验", use_container_width=True):
+            st.session_state.resume_text = SAMPLE_RESUME
+            st.session_state.show_landing = False
+            st.rerun()
+
+    # ── 功能卡片 ──
+    st.markdown("""
+<div style="height:36px"></div>
+<div class="lp-feat-grid">
+  <div class="lp-feat">
+    <div class="lp-feat-icon">🎯</div>
+    <div class="lp-feat-name">岗位匹配</div>
+    <div class="lp-feat-desc">129 条岗位<br>AI 精准打分排序</div>
+  </div>
+  <div class="lp-feat">
+    <div class="lp-feat-icon">🧠</div>
+    <div class="lp-feat-name">策略洞察</div>
+    <div class="lp-feat-desc">高频技能分析<br>投递优先级建议</div>
+  </div>
+  <div class="lp-feat">
+    <div class="lp-feat-icon">📋</div>
+    <div class="lp-feat-name">简历诊断</div>
+    <div class="lp-feat-desc">针对 JD<br>逐条改写建议</div>
+  </div>
+  <div class="lp-feat">
+    <div class="lp-feat-icon">🎤</div>
+    <div class="lp-feat-name">面试备考</div>
+    <div class="lp-feat-desc">高频面试题<br>应答要点 + 弱点预警</div>
+  </div>
+  <div class="lp-feat">
+    <div class="lp-feat-icon">📈</div>
+    <div class="lp-feat-name">投递追踪</div>
+    <div class="lp-feat-desc">可视化看板<br>从待投递到 Offer</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── Stats ──
+    st.markdown("""
+<div class="lp-stats">
+  <div style="text-align:center">
+    <div class="lp-stat-n">129</div>
+    <div class="lp-stat-l">条真实爬取岗位</div>
+  </div>
+  <div style="text-align:center">
+    <div class="lp-stat-n">5</div>
+    <div class="lp-stat-l">AI 核心功能模块</div>
+  </div>
+  <div style="text-align:center">
+    <div class="lp-stat-n">DeepSeek</div>
+    <div class="lp-stat-l">V3 · via OpenRouter</div>
+  </div>
+  <div style="text-align:center">
+    <div class="lp-stat-n">2</div>
+    <div class="lp-stat-l">招聘平台数据源</div>
+  </div>
+</div>
+<div style="text-align:center;margin-top:20px;font-size:.75rem;color:#d1d5db">
+  Boss直聘 &nbsp;·&nbsp; 实习僧 &nbsp;·&nbsp; SQLite 持久化追踪
+</div>
+""", unsafe_allow_html=True)
+
+    st.stop()   # 不渲染主 app
 
 
 # ── 侧边栏 ──────────────────────────────────────────────────────────────────────
@@ -548,6 +682,12 @@ with st.sidebar:
             st.session_state.greetings = {}
             st.rerun()
 
+    # ── 返回首页 ──
+    st.divider()
+    if st.button("← 返回首页", use_container_width=True):
+        st.session_state.show_landing = True
+        st.rerun()
+
 
 # ── 主内容区 ────────────────────────────────────────────────────────────────────
 st.title("🎯 AI 求职智能匹配助手")
@@ -632,26 +772,6 @@ with tab1:
             st.write(f"• Top 20 中：大厂 **{tier_dist.get('大厂',0)}** 个 / 中厂 **{tier_dist.get('中厂',0)}** 个 / 小厂 **{tier_dist.get('小厂',0)}** 个")
 
     st.divider()
-
-    # ── 首屏引导横幅（仅在未加载简历时显示）──
-    if not st.session_state.resume_text:
-        st.markdown("""
-<div style="background:linear-gradient(135deg,#0D9488 0%,#0F766E 60%,#115E59 100%);
-            border-radius:12px;padding:24px 28px;margin-bottom:16px;color:#fff">
-  <div style="font-size:1.35em;font-weight:800;margin-bottom:6px">
-    🎯 129 条真实岗位 · AI 精准打分 · 一键生成打招呼文案
-  </div>
-  <div style="font-size:.93em;opacity:.9;margin-bottom:14px">
-    上传简历（.docx）或点击「💡 使用示例简历体验」，即可解锁 AI 匹配、诊断、面试备考全链路功能。
-  </div>
-  <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:.82em;opacity:.85">
-    <span>📊 匹配打分</span><span>·</span>
-    <span>✏️ 简历改写建议</span><span>·</span>
-    <span>🎤 面试备考</span><span>·</span>
-    <span>📈 投递进度追踪</span>
-  </div>
-</div>
-""", unsafe_allow_html=True)
 
     # ── 空状态 ──
     if not filtered:
