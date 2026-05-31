@@ -1,5 +1,7 @@
 """AI 求职智能匹配助手 — Streamlit 前端"""
 import asyncio
+import hashlib
+import html as _html
 import json
 import os
 import re
@@ -12,7 +14,11 @@ import streamlit as st
 from company_tiers import get_company_tier
 from matcher import diagnose_resume, generate_greeting, generate_interview_prep, match_jobs
 from resume_parser import parse_docx
-from tracker import get_all_jobs as get_tracking_jobs, update_status
+from tracker import add_job_from_match, get_all_jobs as get_tracking_jobs, update_status
+
+def _esc(s: object) -> str:
+    """HTML-escape a value for safe injection into card HTML."""
+    return _html.escape(str(s) if s is not None else "")
 
 # ── 示例简历（一键体验用）────────────────────────────────────────────────────────
 SAMPLE_RESUME = """教育背景
@@ -162,24 +168,24 @@ def _job_card(job: dict, compact: bool = False) -> str:
     concerns   = (job.get("match_concerns")   or [])[:2]
 
     if compact:
-        pills = "".join(f'<span class="jp jp-pos">✓ {h}</span>' for h in highlights[:2])
-        pills += "".join(f'<span class="jp jp-neg">△ {c}</span>' for c in concerns[:1])
+        pills = "".join(f'<span class="jp jp-pos">✓ {_esc(h)}</span>' for h in highlights[:2])
+        pills += "".join(f'<span class="jp jp-neg">△ {_esc(c)}</span>' for c in concerns[:1])
     else:
-        pills = "".join(f'<span class="jp jp-pos">✓ {h}</span>' for h in highlights)
-        pills += "".join(f'<span class="jp jp-neg">△ {c}</span>' for c in concerns)
+        pills = "".join(f'<span class="jp jp-pos">✓ {_esc(h)}</span>' for h in highlights)
+        pills += "".join(f'<span class="jp jp-neg">△ {_esc(c)}</span>' for c in concerns)
         if not highlights and not concerns and job.get("match_reason"):
-            pills = f'<span class="jp jp-tip">💡 {job["match_reason"][:50]}</span>'
+            pills = f'<span class="jp jp-tip">💡 {_esc(job["match_reason"])[:60]}</span>'
 
     return (
         f'<div class="jc">'
         f'<div class="jc-hd">'
-        f'<span class="jc-title">{job.get("title","")}</span>'
+        f'<span class="jc-title">{_esc(job.get("title",""))}</span>'
         f'<span class="jc-score {sc_cls}">{score:.0f}</span>'
         f'</div>'
         f'<div class="jc-meta">'
-        f'<span>{job.get("company","")}</span>{tier_html}{plat_html}'
-        f'<span>·</span><span>{salary}</span>'
-        f'<span>·</span><span>{city}</span>'
+        f'<span>{_esc(job.get("company",""))}</span>{tier_html}{plat_html}'
+        f'<span>·</span><span>{_esc(salary)}</span>'
+        f'<span>·</span><span>{_esc(city)}</span>'
         f'</div>'
         f'<div class="jc-bar-bg"><div class="jc-bar {bar_cls}" style="width:{score}%"></div></div>'
         f'<div class="jc-pills">{pills}</div>'
@@ -203,13 +209,6 @@ def load_jobs() -> list[dict]:
         if not j.get("company_tier"):
             j["company_tier"] = get_company_tier(j.get("company", ""))
     return jobs
-
-
-@st.cache_data
-def load_demo_timeline_jobs() -> list[dict]:
-    path = Path(__file__).parent / "data" / "demo_timeline_jobs.json"
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
 
 
 # ── 工具函数 ────────────────────────────────────────────────────────────────────
@@ -259,6 +258,8 @@ def _init_state():
         "interview_result": None,
         "interview_job_id": None,
         "greetings": {},
+        "t1_page": 0,
+        "_t1_sig": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -267,7 +268,6 @@ def _init_state():
 _init_state()
 
 # ── 常量 ────────────────────────────────────────────────────────────────────────
-TIER_BADGE = {"大厂": "🏆 大厂", "中厂": "🥈 中厂", "小厂": "🏅 小厂"}
 PLATFORM_NAME = {"boss": "Boss直聘", "shixiseng": "实习僧"}
 
 STATUS_CONFIG = {
@@ -473,12 +473,49 @@ with tab1:
 
     st.divider()
 
+    # ── 首屏引导横幅（仅在未加载简历时显示）──
+    if not st.session_state.resume_text:
+        st.markdown("""
+<div style="background:linear-gradient(135deg,#0D9488 0%,#0F766E 60%,#115E59 100%);
+            border-radius:12px;padding:24px 28px;margin-bottom:16px;color:#fff">
+  <div style="font-size:1.35em;font-weight:800;margin-bottom:6px">
+    🎯 129 条真实岗位 · AI 精准打分 · 一键生成打招呼文案
+  </div>
+  <div style="font-size:.93em;opacity:.9;margin-bottom:14px">
+    上传简历（.docx）或点击「💡 使用示例简历体验」，即可解锁 AI 匹配、诊断、面试备考全链路功能。
+  </div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:.82em;opacity:.85">
+    <span>📊 匹配打分</span><span>·</span>
+    <span>✏️ 简历改写建议</span><span>·</span>
+    <span>🎤 面试备考</span><span>·</span>
+    <span>📈 投递进度追踪</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
     # ── 空状态 ──
     if not filtered:
         st.info("📭 未找到符合条件的岗位，请调整左侧的「最低匹配分」、「招聘平台」或「公司规模」筛选条件。")
 
+    # ── 分页逻辑 ──
+    PAGE_SIZE = 20
+    _sig = hashlib.md5(
+        json.dumps([min_score, sorted(platforms), sorted(tiers), sorted(cities_filter), sort_by],
+                   ensure_ascii=False).encode()
+    ).hexdigest()
+    if st.session_state._t1_sig != _sig:
+        st.session_state.t1_page = 0
+        st.session_state._t1_sig = _sig
+
+    total_pages = max(1, (len(filtered) + PAGE_SIZE - 1) // PAGE_SIZE)
+    cur_page    = st.session_state.t1_page
+    page_jobs   = filtered[cur_page * PAGE_SIZE : (cur_page + 1) * PAGE_SIZE]
+
+    # ── 预加载已追踪的 job_id 集合（用于按钮状态）──
+    _tracked_ids = {str(j["job_id"]) for j in get_tracking_jobs()}
+
     # ── 岗位卡片（对标参考设计：直接展示，无 expander）──
-    for job in filtered:
+    for job in page_jobs:
         job_uid = str(job.get("job_id") or job.get("id", ""))
 
         # HTML 卡片
@@ -486,7 +523,7 @@ with tab1:
 
         # 操作按钮行（紧贴卡片底部）
         existing_greeting = st.session_state.greetings.get(job_uid)
-        btn_c1, btn_c2, btn_c3, _ = st.columns([2, 2, 2, 4])
+        btn_c1, btn_c2, btn_c3, btn_c4 = st.columns([2, 2, 2, 2])
 
         with btn_c1:
             if existing_greeting:
@@ -514,6 +551,15 @@ with tab1:
                 if st.button("📄 岗位详情", key=f"det_{job_uid}", use_container_width=True):
                     st.session_state[f"expand_d_{job_uid}"] = not st.session_state.get(f"expand_d_{job_uid}", False)
 
+        with btn_c4:
+            if job_uid in _tracked_ids:
+                st.button("✅ 已追踪", key=f"track_{job_uid}", disabled=True, use_container_width=True)
+            else:
+                if st.button("➕ 加入追踪", key=f"track_{job_uid}", use_container_width=True):
+                    add_job_from_match(job)
+                    st.toast(f"已将「{job.get('title', '')}」加入投递追踪 📋")
+                    st.rerun()
+
         # 可展开：打招呼文案
         if existing_greeting and st.session_state.get(f"expand_g_{job_uid}"):
             st.text_area("打招呼文案", value=existing_greeting, height=70,
@@ -523,11 +569,30 @@ with tab1:
         if st.session_state.get(f"expand_d_{job_uid}"):
             desc = job.get("description") or ""
             req  = job.get("requirements") or ""
-            with st.container():
+            with st.container(border=True):
                 if desc:
-                    st.caption(f"**岗位描述** {desc[:300]}{'…' if len(desc) > 300 else ''}")
+                    st.markdown(f"**岗位描述**\n\n{desc[:400]}{'…' if len(desc) > 400 else ''}")
                 if req:
-                    st.caption(f"**岗位要求** {req[:250]}{'…' if len(req) > 250 else ''}")
+                    st.markdown(f"**岗位要求**\n\n{req[:300]}{'…' if len(req) > 300 else ''}")
+
+    # ── 分页控制栏 ──
+    if total_pages > 1:
+        st.divider()
+        pg_c1, pg_c2, pg_c3 = st.columns([1, 3, 1])
+        with pg_c1:
+            if st.button("← 上一页", disabled=(cur_page == 0), use_container_width=True):
+                st.session_state.t1_page -= 1
+                st.rerun()
+        with pg_c2:
+            st.markdown(
+                f"<div style='text-align:center;color:#6b7280;font-size:.87em;padding-top:6px'>"
+                f"第 {cur_page+1} / {total_pages} 页 · 共 {len(filtered)} 条岗位</div>",
+                unsafe_allow_html=True,
+            )
+        with pg_c3:
+            if st.button("下一页 →", disabled=(cur_page >= total_pages - 1), use_container_width=True):
+                st.session_state.t1_page += 1
+                st.rerun()
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -583,67 +648,82 @@ with tab2:
         st.session_state.interview_result = iv_result
         st.session_state.interview_job_id = cur_job_id
 
-    # ── 展示诊断结果 ──
-    result = st.session_state.diagnosis_result
-    if result and st.session_state.diagnosis_job_id == cur_job_id:
+    # ── 结果区域：分为两个子 Tab ──
+    has_diag = bool(
+        st.session_state.diagnosis_result and
+        st.session_state.diagnosis_job_id == cur_job_id
+    )
+    has_iv = bool(
+        st.session_state.interview_result and
+        st.session_state.interview_job_id == cur_job_id
+    )
+
+    if has_diag or has_iv:
         st.divider()
-        st.subheader("🔍 简历诊断结果")
-        score_val = result.get("score", 0)
+        res_tab1, res_tab2 = st.tabs(["🔍 简历诊断结果", "🎤 面试备考材料"])
 
-        diag_c1, diag_c2, diag_c3 = st.columns([1, 2, 2])
-        with diag_c1:
-            st.metric("综合匹配分", f"{score_val} / 100")
-            st.progress(int(score_val) / 100)
+        # ── 子 Tab 1：简历诊断结果 ──
+        with res_tab1:
+            if has_diag:
+                result = st.session_state.diagnosis_result
+                score_val = result.get("score", 0)
 
-        with diag_c2:
-            strengths = result.get("strengths") or []
-            if strengths:
-                st.write("**🎯 核心匹配优势**")
-                for s in strengths:
-                    st.success(s)
-            gaps = result.get("gaps") or []
-            if gaps:
-                st.write("**⚠️ 主要差距**")
-                for g in gaps:
-                    st.warning(g)
+                diag_c1, diag_c2, diag_c3 = st.columns([1, 2, 2])
+                with diag_c1:
+                    st.metric("综合匹配分", f"{score_val} / 100")
+                    st.progress(int(score_val) / 100)
 
-        with diag_c3:
-            improvements = result.get("improvements") or []
-            if improvements:
-                st.write("**✏️ 可落地的改写建议**")
-                for i, tip in enumerate(improvements, 1):
-                    st.info(f"**{i}.** {tip}")
+                with diag_c2:
+                    strengths = result.get("strengths") or []
+                    if strengths:
+                        st.write("**🎯 核心匹配优势**")
+                        for s in strengths:
+                            st.success(s)
+                    gaps = result.get("gaps") or []
+                    if gaps:
+                        st.write("**⚠️ 主要差距**")
+                        for g in gaps:
+                            st.warning(g)
 
-        if result.get("summary"):
-            st.divider()
-            st.markdown(f"> 💬 **AI 总结**：{result['summary']}")
+                with diag_c3:
+                    improvements = result.get("improvements") or []
+                    if improvements:
+                        st.write("**✏️ 可落地的改写建议**")
+                        for i, tip in enumerate(improvements, 1):
+                            st.info(f"**{i}.** {tip}")
 
-    # ── 展示面试备考 ──
-    iv = st.session_state.interview_result
-    if iv and st.session_state.interview_job_id == cur_job_id:
-        st.divider()
-        st.subheader("🎤 面试备考材料")
+                if result.get("summary"):
+                    st.divider()
+                    st.markdown(f"> 💬 **AI 总结**：{result['summary']}")
+            else:
+                st.info("点击上方「🔍 简历诊断 + 改写建议」按钮生成诊断报告。")
 
-        iv_col1, iv_col2 = st.columns([3, 2])
-        with iv_col1:
-            questions = iv.get("questions") or []
-            if questions:
-                st.write("**❓ 高频面试题 & 应答思路**")
-                for i, q in enumerate(questions, 1):
-                    with st.expander(f"Q{i}. {q.get('q', '')}", expanded=(i == 1)):
-                        st.write(f"💡 **应答要点**：{q.get('hint', '')}")
+        # ── 子 Tab 2：面试备考材料 ──
+        with res_tab2:
+            if has_iv:
+                iv = st.session_state.interview_result
+                iv_col1, iv_col2 = st.columns([3, 2])
+                with iv_col1:
+                    questions = iv.get("questions") or []
+                    if questions:
+                        st.write("**❓ 高频面试题 & 应答思路**")
+                        for i, q in enumerate(questions, 1):
+                            with st.expander(f"Q{i}. {q.get('q', '')}", expanded=(i == 1)):
+                                st.write(f"💡 **应答要点**：{q.get('hint', '')}")
 
-        with iv_col2:
-            key_points = iv.get("key_points") or []
-            if key_points:
-                st.write("**⭐ 面试中需重点强调**")
-                for kp in key_points:
-                    st.success(kp)
-            red_flags = iv.get("red_flags") or []
-            if red_flags:
-                st.write("**🚩 需提前准备解释的弱点**")
-                for rf in red_flags:
-                    st.warning(rf)
+                with iv_col2:
+                    key_points = iv.get("key_points") or []
+                    if key_points:
+                        st.write("**⭐ 面试中需重点强调**")
+                        for kp in key_points:
+                            st.success(kp)
+                    red_flags = iv.get("red_flags") or []
+                    if red_flags:
+                        st.write("**🚩 需提前准备解释的弱点**")
+                        for rf in red_flags:
+                            st.warning(rf)
+            else:
+                st.info("点击上方「🎤 面试备考题」按钮生成面试备考材料。")
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -822,5 +902,8 @@ with tab4:
 | v2 | Streamlit 重构，接入 AI 匹配 + 简历诊断 |
 | v3 | 新增打招呼生成、面试备考、策略洞察、一键体验 |
 | v4 | UI 精简：去除冗余控件，优化信息层级与交互流 |
-| v5（当前）| UX 强化：空状态引导、主色重设计、Tab4 视觉化重构 |
+| v5 | UX 强化：空状态引导、主色重设计、Tab4 视觉化重构 |
+| v6 | 看板增强：卡片 CSS 对标参考设计，增加分数进度条、胶囊标签、徽章系统 |
+| v7 | 安全与交互：XSS 转义、API Key 脱敏显示、SQLite 看板可拖动更新 |
+| v8（当前）| 全面优化：首屏引导横幅、卡片列表分页（每页20条）、Tab1→Tab3「加入追踪」联动、简历诊断/面试备考子 Tab、岗位详情 Markdown 渲染 |
 """)

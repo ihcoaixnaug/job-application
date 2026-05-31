@@ -122,6 +122,43 @@ def update_status(job_id: str, new_status: str, note: str = "") -> None:
         conn.commit()
 
 
+def add_job_from_match(job: dict) -> bool:
+    """Add a job from the matcher results to tracking as 'pending'.
+
+    Returns True if newly inserted, False if already present.
+    """
+    init_db()
+    jid = str(job.get("job_id") or job.get("id") or "")
+    if not jid:
+        return False
+    with _conn() as conn:
+        if conn.execute("SELECT 1 FROM tracking_jobs WHERE job_id=?", (jid,)).fetchone():
+            return False
+        conn.execute("""
+        INSERT INTO tracking_jobs
+        (job_id, title, company, salary, location, match_score,
+         match_reason, match_highlights, match_concerns, url, status,
+         company_tier, platform, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            jid, job.get("title"), job.get("company"),
+            job.get("salary"), job.get("location"),
+            job.get("match_score", 0), job.get("match_reason"),
+            json.dumps(job.get("match_highlights", []), ensure_ascii=False),
+            json.dumps(job.get("match_concerns", []), ensure_ascii=False),
+            job.get("url"), "pending",
+            job.get("company_tier"), job.get("platform"),
+            date.today().isoformat(),
+        ))
+        conn.execute(
+            "INSERT INTO tracking_timeline (job_id, event_date, event_status, note) "
+            "VALUES (?,?,?,?)",
+            (jid, date.today().isoformat(), "待投递", "从匹配看板加入"),
+        )
+        conn.commit()
+    return True
+
+
 def reset_db() -> None:
     """Drop all data and re-seed from the demo JSON (for dev resets)."""
     DB_PATH.unlink(missing_ok=True)
