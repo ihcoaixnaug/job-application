@@ -25,6 +25,30 @@ def _esc(s: object) -> str:
     """HTML-escape a value for safe injection into card HTML."""
     return _html.escape(str(s) if s is not None else "")
 
+
+def _clean(s: object) -> str:
+    """Strip Boss直聘反爬字体私用区字符（U+E000–U+F8FF）及常见乱码字符。
+
+    Boss直聘用私用区码点替换真实汉字防止爬虫，在普通字体中渲染为方块/空白。
+    """
+    if s is None:
+        return ""
+    out = []
+    for ch in str(s):
+        cp = ord(ch)
+        # 跳过 Unicode 私用区（BMP 私用区 + 补充私用区）
+        if 0xE000 <= cp <= 0xF8FF or 0xF0000 <= cp <= 0x10FFFF:
+            continue
+        # 跳过替换字符 U+FFFD
+        if cp == 0xFFFD:
+            continue
+        out.append(ch)
+    # 清理因删除字符产生的空括号、多余空格/连字符
+    result = "".join(out)
+    result = re.sub(r"[（(]\s*[）)]", "", result)          # 空括号
+    result = re.sub(r"[-\s]{2,}", lambda m: " " if " " in m.group() else "-", result)
+    return result.strip(" -·")
+
 # ── 示例简历（一键体验用）────────────────────────────────────────────────────────
 SAMPLE_RESUME = """教育背景
 某985高校 | 应用经济学·数据科学方向 | 硕士 | GPA 3.9/4.0
@@ -216,12 +240,19 @@ def load_jobs() -> list[dict]:
     with open(path, encoding="utf-8") as f:
         jobs = json.load(f)
     for j in jobs:
+        # 清洗文本字段中的爬虫编码乱码
+        for tf in ("title", "company", "salary", "location", "description",
+                   "requirements", "match_reason"):
+            if j.get(tf):
+                j[tf] = _clean(j[tf])
         for field in ("match_highlights", "match_concerns"):
             if isinstance(j.get(field), str):
                 try:
                     j[field] = json.loads(j[field])
                 except Exception:
                     j[field] = []
+            if isinstance(j.get(field), list):
+                j[field] = [_clean(x) for x in j[field]]
         if not j.get("company_tier"):
             j["company_tier"] = get_company_tier(j.get("company", ""))
     return jobs
