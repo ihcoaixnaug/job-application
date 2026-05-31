@@ -181,6 +181,58 @@ job-application/
 
 ---
 
+## 落地页（Streamlit）
+
+落地页入口为 `streamlit_app.py`，运行在 Streamlit Cloud，负责产品介绍和用户引流。
+
+```bash
+streamlit run streamlit_app.py --server.port 8503
+```
+
+### 设计规范
+
+**字体**
+
+| 用途 | 字体 |
+|---|---|
+| 中文标题 / 小标题 | Noto Serif SC（Google Fonts，700）|
+| 英文大标题（Hero） | DM Serif Display（Google Fonts，400）|
+| 正文 / 说明文字 | 系统 sans-serif |
+
+**色板**
+
+| 变量 | 值 | 用途 |
+|---|---|---|
+| 主色 | `#d64635` | CTA 按钮、装饰符、高亮 |
+| 深色 | `#272937` | 标题、正文 |
+| 辅助灰 | `rgba(39,41,55,.45)` | 副标题、说明 |
+
+**排版尺寸**
+
+| 元素 | 尺寸 |
+|---|---|
+| Hero 主标题（`.lp-h1`） | 2.75rem |
+| 各板块小标题（`.lp-section-label`） | 2.75rem，font-weight: 700 |
+| 功能板块特性标题（`.ftitle`） | 2.75rem |
+| 正文 | 1rem，line-height: 2 |
+
+**间距规范**
+
+- 各板块顶部统一 `padding-top: 56px`
+- 导航栏高度 `64px`，锚点 `scroll-margin-top: 80px`
+- 功能行（`.fr`）内边距 `96px 0`，左右列间距 `gap: 72px`
+
+**组件**
+
+- 小标题左右各带 `✦` 装饰符（`::before` / `::after` 伪元素，颜色 `#d64635`）
+- 功能卡片悬停：`translateY(-4px)` + `box-shadow`，过渡曲线 `cubic-bezier(.22,1,.36,1)`
+- iframe 板块（功能/数据/评价/FAQ）均通过 `postMessage({type:'streamlit:setFrameHeight'})` 自动适配高度，消除底部空白
+- Hero 元素入场动画：`lp-fadeup`（opacity + translateY），三段错开 0.05s / 0.22s / 0.38s
+
+**设计参考**：[Correlate AI](https://www.thecorrelate.com/)（排版比例、板块间距、滚动动画风格）
+
+---
+
 ## License
 
 MIT
