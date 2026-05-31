@@ -403,20 +403,26 @@ with st.sidebar:
     with st.expander("🔍 高级筛选"):
         min_score = st.slider("最低匹配分", 0, 100, 60)
         platforms = st.multiselect(
-            "招聘平台", ["boss", "shixiseng"],
-            default=["boss", "shixiseng"],
+            "招聘平台（空 = 不限）", ["boss", "shixiseng"],
+            default=[],
             format_func=lambda x: PLATFORM_NAME.get(x, x),
+            placeholder="不限平台",
         )
         tiers = st.multiselect(
-            "公司规模", ["大厂", "中厂", "小厂"],
-            default=["大厂", "中厂", "小厂"],
+            "公司规模（空 = 不限）", ["大厂", "中厂", "小厂"],
+            default=[],
+            placeholder="不限规模",
         )
         _all_cities = sorted(set(
             j.get("location", "").split("-")[0].strip()
             for j in load_jobs()
             if j.get("location", "").strip()
         ))
-        cities_filter = st.multiselect("城市", _all_cities, default=_all_cities)
+        cities_filter = st.multiselect(
+            "城市（空 = 不限）", _all_cities,
+            default=[],
+            placeholder="不限城市",
+        )
         sort_by = st.selectbox(
             "排序方式",
             ["匹配分（高→低）", "公司规模（大厂优先）", "城市"],
@@ -464,9 +470,9 @@ with tab1:
     _pool = [
         j for j in all_jobs
         if j.get("match_score", 0) >= min_score
-        and j.get("platform") in platforms
-        and get_company_tier(j.get("company", "")) in tiers
-        and j.get("location", "").split("-")[0].strip() in cities_filter
+        and (not platforms or j.get("platform") in platforms)
+        and (not tiers    or get_company_tier(j.get("company", "")) in tiers)
+        and (not cities_filter or j.get("location", "").split("-")[0].strip() in cities_filter)
     ]
     if sort_by == "匹配分（高→低）":
         filtered = sorted(_pool, key=lambda x: x.get("match_score", 0), reverse=True)
