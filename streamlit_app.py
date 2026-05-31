@@ -682,14 +682,15 @@ with st.sidebar:
             st.session_state.greetings = {}
             st.rerun()
 
-    # ── 返回首页 ──
-    st.divider()
-    if st.button("← 返回首页", use_container_width=True):
-        st.session_state.show_landing = True
-        st.rerun()
 
 
 # ── 主内容区 ────────────────────────────────────────────────────────────────────
+_nav_col, _title_col = st.columns([1, 9])
+with _nav_col:
+    if st.button("← 首页", use_container_width=True):
+        st.session_state.show_landing = True
+        st.rerun()
+
 st.title("🎯 AI 求职智能匹配助手")
 st.markdown(
     '<p style="margin-top:-10px;margin-bottom:4px;font-size:.88rem;color:#6b7280;line-height:1.6">'
