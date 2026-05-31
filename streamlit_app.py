@@ -12,6 +12,7 @@ import streamlit as st
 from company_tiers import get_company_tier
 from matcher import diagnose_resume, generate_greeting, generate_interview_prep, match_jobs
 from resume_parser import parse_docx
+from tracker import STATUS_LABELS, get_all_jobs as get_tracking_jobs, update_status
 
 # ── 示例简历（一键体验用）────────────────────────────────────────────────────────
 SAMPLE_RESUME = """教育背景
@@ -197,6 +198,14 @@ with st.sidebar:
 
     if st.session_state.resume_text:
         st.caption(f"当前简历：{len(st.session_state.resume_text)} 字")
+        with st.expander("👁️ 查看简历全文"):
+            st.text_area(
+                "简历内容",
+                value=st.session_state.resume_text,
+                height=300,
+                label_visibility="collapsed",
+                key="resume_preview",
+            )
 
     st.divider()
 
@@ -312,7 +321,6 @@ with tab1:
     # ── 空状态 ──
     if not filtered:
         st.info("📭 未找到符合条件的岗位，请调整左侧的「最低匹配分」、「招聘平台」或「公司规模」筛选条件。")
-        st.stop()
 
     # ── 岗位卡片 ──
     for job in filtered:
@@ -492,15 +500,16 @@ with tab2:
 
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Tab 3：投递进度追踪
+# Tab 3：投递进度追踪（SQLite 后端，状态可编辑）
 # ────────────────────────────────────────────────────────────────────────────────
 with tab3:
-    demo_jobs = load_demo_timeline_jobs()
-    counts = {s: sum(1 for j in demo_jobs if j.get("status") == s) for s in STATUS_ORDER}
+    # 每次从 DB 读取（不缓存，保证更新后立即可见）
+    track_jobs = get_tracking_jobs()
+    counts = {s: sum(1 for j in track_jobs if j.get("status") == s) for s in STATUS_ORDER}
 
     st.subheader("📈 投递进度追踪")
 
-    # ── 4 个关键指标（去掉低频状态） ──
+    # ── 4 个关键指标 ──
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("📤 已投递", sum(counts.get(s, 0) for s in ["applied", "viewed", "chatting", "interview", "final_interview", "waiting", "offer"]))
     k2.metric("💬 面试中", sum(counts.get(s, 0) for s in ["interview", "final_interview"]))
@@ -509,27 +518,26 @@ with tab3:
 
     # ── 漏斗进度条 ──
     funnel_steps = [
-        ("📤 已投递", sum(counts.get(s, 0) for s in ["applied", "viewed", "chatting", "interview", "final_interview", "waiting", "offer"])),
+        ("📤 已投递",  sum(counts.get(s, 0) for s in ["applied", "viewed", "chatting", "interview", "final_interview", "waiting", "offer"])),
         ("💬 进入面试", sum(counts.get(s, 0) for s in ["interview", "final_interview", "waiting", "offer"])),
         ("⏳ 等待结果", sum(counts.get(s, 0) for s in ["waiting", "offer"])),
         ("🎉 获得 Offer", counts.get("offer", 0)),
     ]
     base = funnel_steps[0][1] or 1
-    for label, val in funnel_steps:
-        cols = st.columns([3, 1])
-        cols[0].progress(val / base, text=f"{label}  {val} 条")
+    for f_label, f_val in funnel_steps:
+        st.columns([3, 1])[0].progress(f_val / base, text=f"{f_label}  {f_val} 条")
 
     st.divider()
 
-    # ── 状态筛选（合并了「显示已拒绝」开关） ──
+    # ── 状态筛选 ──
     status_options = ["全部（含已拒绝）", "全部（不含已拒绝）"] + [
         f"{STATUS_CONFIG[s][0]} {STATUS_CONFIG[s][1]}"
         for s in STATUS_ORDER
-        if any(j.get("status") == s for j in demo_jobs)
+        if any(j.get("status") == s for j in track_jobs)
     ]
     status_filter = st.selectbox("按状态筛选", status_options)
 
-    # ── 岗位卡片 ──
+    # ── 岗位卡片（可编辑状态）──
     for status_group in STATUS_ORDER:
         if status_filter == "全部（不含已拒绝）" and status_group == "rejected":
             continue
@@ -537,7 +545,7 @@ with tab3:
             if STATUS_CONFIG.get(status_group, ("", ""))[1] not in status_filter:
                 continue
 
-        group_jobs = [j for j in demo_jobs if j.get("status") == status_group]
+        group_jobs = [j for j in track_jobs if j.get("status") == status_group]
         if not group_jobs:
             continue
 
@@ -548,6 +556,7 @@ with tab3:
             score = job.get("match_score", 0)
             tier = get_company_tier(job.get("company", ""))
             salary = job.get("salary") or "薪资面议"
+            job_uid = str(job.get("job_id", ""))
 
             header = (
                 f"{score_color(score)} **{score:.0f} 分** ｜ "
@@ -559,15 +568,38 @@ with tab3:
                 tl_col, info_col = st.columns([2, 3])
 
                 with tl_col:
+                    # 时间线
                     timeline = job.get("timeline") or []
                     if timeline:
                         st.write("**📅 投递时间线**")
                         for event in timeline:
                             tl_icon = TIMELINE_ICONS.get(event.get("status", ""), "•")
-                            note = f" — {event['note']}" if event.get("note") else ""
-                            st.write(f"`{event['date']}` {tl_icon} **{event['status']}**{note}")
+                            note_str = f" — {event['note']}" if event.get("note") else ""
+                            st.write(f"`{event['date']}` {tl_icon} **{event['status']}**{note_str}")
                     else:
                         st.caption("暂未投递")
+
+                    # ── 状态编辑控件 ──
+                    st.write("---")
+                    st.write("**✏️ 更新进度**")
+                    cur_idx = STATUS_ORDER.index(status_group) if status_group in STATUS_ORDER else 0
+                    new_status = st.selectbox(
+                        "新状态",
+                        options=STATUS_ORDER,
+                        index=cur_idx,
+                        format_func=lambda s: f"{STATUS_CONFIG[s][0]} {STATUS_CONFIG[s][1]}",
+                        key=f"sel_{job_uid}",
+                        label_visibility="collapsed",
+                    )
+                    note_input = st.text_input(
+                        "备注（可选）",
+                        placeholder="如：面试定于周三下午",
+                        key=f"note_{job_uid}",
+                    )
+                    if st.button("✅ 保存进度", key=f"save_{job_uid}", type="primary"):
+                        update_status(job_uid, new_status, note_input)
+                        st.success("进度已更新！")
+                        st.rerun()
 
                 with info_col:
                     if job.get("match_reason"):
