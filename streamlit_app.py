@@ -14,7 +14,7 @@ import streamlit as st
 from company_tiers import get_company_tier
 from matcher import diagnose_resume, generate_greeting, generate_interview_prep, match_jobs
 from resume_parser import parse_docx
-from tracker import add_job_from_match, get_all_jobs as get_tracking_jobs, update_status
+from tracker import add_job_from_match, add_job_manual, get_all_jobs as get_tracking_jobs, update_status
 
 def _esc(s: object) -> str:
     """HTML-escape a value for safe injection into card HTML."""
@@ -764,11 +764,96 @@ def _move_job(job_uid: str, old_status: str):
         update_status(job_uid, new_s, "")
 
 
+@st.dialog("✏️ 手动添加岗位")
+def _dialog_add_manual():
+    st.caption("手动录入一条岗位信息，加入投递追踪。")
+    with st.form("manual_add_form", border=False):
+        col_a, col_b = st.columns(2)
+        title    = col_a.text_input("岗位名称 *", placeholder="如：数据运营实习生")
+        company  = col_b.text_input("公司名称 *", placeholder="如：字节跳动")
+        col_c, col_d = st.columns(2)
+        salary   = col_c.text_input("薪资", placeholder="如：150元/天")
+        location = col_d.text_input("城市", placeholder="如：北京")
+        url      = st.text_input("岗位链接", placeholder="https://...")
+        note     = st.text_input("备注", placeholder="可选，如：内推 / 朋友推荐 等")
+        submitted = st.form_submit_button("➕ 加入追踪", type="primary", use_container_width=True)
+    if submitted:
+        if not title.strip() or not company.strip():
+            st.error("岗位名称和公司名称为必填项。")
+        else:
+            add_job_manual(title, company, salary, location, url, note)
+            st.toast(f"已添加「{title.strip()}」到投递追踪 📋")
+            st.rerun()
+
+
+@st.dialog("🎯 从匹配看板选取岗位", width="large")
+def _dialog_add_from_pool():
+    pool_jobs  = st.session_state.matched_jobs or load_jobs()
+    tracked_ids = {str(j["job_id"]) for j in get_tracking_jobs()}
+    untracked  = [j for j in pool_jobs if str(j.get("job_id") or j.get("id","")) not in tracked_ids]
+
+    st.caption(f"共 **{len(untracked)}** 条尚未追踪的匹配岗位，点击「加入」即可加入投递追踪。")
+
+    # 搜索框
+    kw = st.text_input("🔍 搜索岗位 / 公司", placeholder="输入关键词快速过滤…", label_visibility="collapsed")
+    if kw.strip():
+        kw_lower = kw.strip().lower()
+        untracked = [
+            j for j in untracked
+            if kw_lower in (j.get("title") or "").lower()
+            or kw_lower in (j.get("company") or "").lower()
+        ]
+
+    # 排序：分数高→低
+    untracked = sorted(untracked, key=lambda x: x.get("match_score", 0), reverse=True)
+
+    if not untracked:
+        st.info("没有符合条件的岗位，或全部已加入追踪。")
+        return
+
+    # 列表（最多展示 60 条，超出提示搜索缩小范围）
+    display = untracked[:60]
+    for job in display:
+        jid   = str(job.get("job_id") or job.get("id", ""))
+        score = job.get("match_score", 0)
+        tier  = get_company_tier(job.get("company", ""))
+        sc_color = "#10b981" if score >= 80 else ("#f59e0b" if score >= 65 else "#ef4444")
+        tier_tag = {"大厂": "🏆", "中厂": "🥈", "小厂": "🏅"}.get(tier, "")
+        salary = job.get("salary") or "薪资面议"
+        city   = (job.get("location") or "").split("-")[0]
+
+        col_info, col_btn = st.columns([5, 1])
+        with col_info:
+            st.markdown(
+                f"**{job.get('title','')}** &nbsp; {tier_tag} {job.get('company','')} "
+                f"· {salary} · {city} &nbsp; "
+                f"<span style='color:{sc_color};font-weight:700'>{score:.0f}分</span>",
+                unsafe_allow_html=True,
+            )
+        with col_btn:
+            if st.button("➕ 加入", key=f"pool_{jid}", use_container_width=True):
+                add_job_from_match(job)
+                st.toast(f"已添加「{job.get('title','')}」📋")
+                st.rerun()
+
+    if len(untracked) > 60:
+        st.caption(f"仅展示前 60 条，使用搜索框缩小范围（共 {len(untracked)} 条）。")
+
+
 with tab3:
     track_jobs = get_tracking_jobs()  # 每次从 DB 读取，确保即时更新
     counts = {s: sum(1 for j in track_jobs if j.get("status") == s) for s in STATUS_ORDER}
 
     st.subheader("📈 投递进度追踪")
+
+    # ── 添加岗位操作区 ──
+    add_c1, add_c2, _ = st.columns([2, 2, 6])
+    with add_c1:
+        if st.button("✏️ 手动添加岗位", use_container_width=True):
+            _dialog_add_manual()
+    with add_c2:
+        if st.button("🎯 从匹配看板选取", use_container_width=True):
+            _dialog_add_from_pool()
 
     # ── 关键指标 ──
     k1, k2, k3, k4 = st.columns(4)

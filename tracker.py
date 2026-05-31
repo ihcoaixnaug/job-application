@@ -1,6 +1,7 @@
 """SQLite-backed job tracking — stores status updates across sessions."""
 import json
 import sqlite3
+import uuid
 from datetime import date
 from pathlib import Path
 from typing import List, Dict
@@ -157,6 +158,41 @@ def add_job_from_match(job: dict) -> bool:
         )
         conn.commit()
     return True
+
+
+def add_job_manual(
+    title: str,
+    company: str,
+    salary: str = "",
+    location: str = "",
+    url: str = "",
+    note: str = "",
+) -> str:
+    """Manually add a job to tracking as 'pending'. Returns the new job_id."""
+    init_db()
+    jid = "manual_" + uuid.uuid4().hex[:8]
+    today = date.today().isoformat()
+    with _conn() as conn:
+        conn.execute("""
+        INSERT INTO tracking_jobs
+        (job_id, title, company, salary, location, match_score,
+         match_reason, match_highlights, match_concerns, url, status,
+         company_tier, platform, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            jid, title.strip(), company.strip(),
+            salary.strip(), location.strip(),
+            0, "", "[]", "[]",
+            url.strip(), "pending", "", "",
+            today,
+        ))
+        conn.execute(
+            "INSERT INTO tracking_timeline (job_id, event_date, event_status, note) "
+            "VALUES (?,?,?,?)",
+            (jid, today, "待投递", note.strip() or "手动添加"),
+        )
+        conn.commit()
+    return jid
 
 
 def reset_db() -> None:
