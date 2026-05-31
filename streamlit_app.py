@@ -99,6 +99,9 @@ st.markdown("""
 .bd-sml{background:#f3f4f6;color:#6b7280}
 .bd-boss{background:#1e293b;color:#fff}
 .bd-shix{background:#0ea5e9;color:#fff}
+/* 看板紧凑卡片最低高度，减少行间高度落差 */
+div[data-testid="stVerticalBlock"] .jc{min-height:130px;
+    display:flex;flex-direction:column;justify-content:space-between}
 /* 看板列头 */
 .kb-hd{font-weight:700;font-size:.9em;display:flex;align-items:center;gap:6px;
        margin-bottom:4px}
@@ -875,12 +878,19 @@ with tab3:
 
     st.divider()
 
-    # ── 看板（5 列）── 使用统一 CSS 系统
-    kb_cols = st.columns(len(_KANBAN_STAGES))
-    for col_obj, (icon, stage_lbl, stage_statuses, col_color) in zip(kb_cols, _KANBAN_STAGES):
-        stage_jobs = [j for j in track_jobs if j.get("status") in stage_statuses]
+    # ── 看板：逐行渲染，保证跨列对齐 ──────────────────────────────────────────
+    # 1. 先按列整理好卡片列表
+    _stage_job_lists = [
+        [j for j in track_jobs if j.get("status") in stage_statuses]
+        for (_, _, stage_statuses, _) in _KANBAN_STAGES
+    ]
+
+    # 2. 表头行（一次性渲染）
+    hdr_cols = st.columns(len(_KANBAN_STAGES))
+    for col_obj, (icon, stage_lbl, stage_statuses, col_color), stage_jobs in zip(
+        hdr_cols, _KANBAN_STAGES, _stage_job_lists
+    ):
         with col_obj:
-            # 列标题：圆点 + 名称 + 计数徽章
             st.markdown(
                 f'<div class="kb-hd">'
                 f'<span class="kb-dot" style="background:{col_color}"></span>'
@@ -890,14 +900,24 @@ with tab3:
                 f'<div class="kb-rule" style="background:{col_color}"></div>',
                 unsafe_allow_html=True,
             )
-            for job in stage_jobs:
+
+    # 3. 卡片区：逐行渲染 — 每行新建一组 5 列，确保同行高度对齐
+    max_rows = max((len(jl) for jl in _stage_job_lists), default=0)
+    for row_idx in range(max_rows):
+        row_cols = st.columns(len(_KANBAN_STAGES))
+        for col_obj, (icon, stage_lbl, stage_statuses, col_color), stage_jobs in zip(
+            row_cols, _KANBAN_STAGES, _stage_job_lists
+        ):
+            with col_obj:
+                if row_idx >= len(stage_jobs):
+                    # 占位：保持列宽但不渲染内容
+                    st.empty()
+                    continue
+                job = stage_jobs[row_idx]
                 job_uid = str(job["job_id"])
                 cur_st  = job.get("status", "pending")
 
-                # 紧凑版卡片（含分数条 + 匹配胶囊）
                 st.markdown(_job_card(job, compact=True), unsafe_allow_html=True)
-
-                # 移至下拉（on_change 直接保存 → 卡片即时跳列）
                 st.selectbox(
                     "移至",
                     options=STATUS_ORDER,
@@ -911,25 +931,35 @@ with tab3:
                 if st.button("📋 时间线", key=f"tl_{job_uid}", use_container_width=True):
                     _show_timeline(job)
 
-    # ── 已拒绝（折叠）──
+    # ── 已拒绝（折叠，逐行对齐）──
     rejected_jobs = [j for j in track_jobs if j.get("status") == "rejected"]
     if rejected_jobs:
         st.divider()
         with st.expander(f"❌ 已拒绝 ({len(rejected_jobs)})", expanded=False):
-            for job in rejected_jobs:
-                job_uid = str(job["job_id"])
-                cur_st  = job.get("status", "rejected")
-                st.markdown(_job_card(job, compact=True), unsafe_allow_html=True)
-                st.selectbox(
-                    "移至",
-                    options=STATUS_ORDER,
-                    index=STATUS_ORDER.index(cur_st) if cur_st in STATUS_ORDER else 0,
-                    format_func=lambda s: f"{STATUS_CONFIG[s][0]} {STATUS_CONFIG[s][1]}",
-                    key=f"kb_{job_uid}",
-                    label_visibility="collapsed",
-                    on_change=_move_job,
-                    args=(job_uid, cur_st),
-                )
+            rej_cols_per_row = 5
+            for row_start in range(0, len(rejected_jobs), rej_cols_per_row):
+                row_batch = rejected_jobs[row_start : row_start + rej_cols_per_row]
+                # pad to 5 so columns stay even
+                padded = row_batch + [None] * (rej_cols_per_row - len(row_batch))
+                rej_row_cols = st.columns(rej_cols_per_row)
+                for col_obj, job in zip(rej_row_cols, padded):
+                    with col_obj:
+                        if job is None:
+                            st.empty()
+                            continue
+                        job_uid = str(job["job_id"])
+                        cur_st  = job.get("status", "rejected")
+                        st.markdown(_job_card(job, compact=True), unsafe_allow_html=True)
+                        st.selectbox(
+                            "移至",
+                            options=STATUS_ORDER,
+                            index=STATUS_ORDER.index(cur_st) if cur_st in STATUS_ORDER else 0,
+                            format_func=lambda s: f"{STATUS_CONFIG[s][0]} {STATUS_CONFIG[s][1]}",
+                            key=f"kb_{job_uid}",
+                            label_visibility="collapsed",
+                            on_change=_move_job,
+                            args=(job_uid, cur_st),
+                        )
 
 
 # ────────────────────────────────────────────────────────────────────────────────
