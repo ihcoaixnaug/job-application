@@ -164,8 +164,6 @@ TIMELINE_ICONS = {
 
 # ── 侧边栏 ──────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("🙋 我的信息")
-
     # API Key
     api_key_input = st.text_input(
         "OpenRouter API Key",
@@ -311,6 +309,11 @@ with tab1:
 
     st.divider()
 
+    # ── 空状态 ──
+    if not filtered:
+        st.info("📭 未找到符合条件的岗位，请调整左侧的「最低匹配分」、「招聘平台」或「公司规模」筛选条件。")
+        st.stop()
+
     # ── 岗位卡片 ──
     for job in filtered:
         score = job.get("match_score", 0)
@@ -392,16 +395,16 @@ with tab2:
 
     ready = bool(st.session_state.resume_text and st.session_state.api_key)
 
-    btn_col1, btn_col2, btn_hint = st.columns([2, 2, 3])
+    if not st.session_state.resume_text:
+        st.info("👈 请先在左侧点击「💡 使用示例简历体验」，或上传你的 .docx 简历，再点击下方按钮开始分析。")
+    elif not st.session_state.api_key:
+        st.info("👈 请先在左侧填入 OpenRouter API Key，即可解锁 AI 诊断功能。")
+
+    btn_col1, btn_col2 = st.columns([2, 2])
     with btn_col1:
         run_diag = st.button("🔍 简历诊断 + 改写建议", type="primary", disabled=not ready)
     with btn_col2:
         run_interview = st.button("🎤 面试备考题", disabled=not ready)
-    with btn_hint:
-        if not st.session_state.resume_text:
-            st.caption("⬅️ 请先在左侧上传简历或点击「使用示例简历体验」")
-        elif not st.session_state.api_key:
-            st.caption("⬅️ 请先填入 API Key")
 
     # ── 执行诊断 ──
     if run_diag and ready:
@@ -588,50 +591,55 @@ with tab3:
 # ────────────────────────────────────────────────────────────────────────────────
 with tab4:
     st.subheader("ℹ️ 项目说明")
-    st.markdown("""
-### 问题背景
 
-学生求职面临两大核心痛点：
-1. **海量岗位筛选难**：在数百条岗位中人工判断匹配度耗时且主观
-2. **简历命中率低**：不知道简历与目标岗位的具体差距，无法针对性优化
+    # ── 核心痛点 ──
+    p1, p2 = st.columns(2)
+    with p1:
+        st.error("**😤 痛点 1：海量岗位筛选难**\n\n数百条岗位靠人工逐条判断匹配度，耗时且主观。")
+    with p2:
+        st.error("**😤 痛点 2：简历命中率低**\n\n不知道简历与目标 JD 的具体差距，无法针对性优化。")
 
-### 解决方案：全链路 AI 求职智能体
+    st.divider()
 
-| 模块 | 解决的问题 | 技术实现 |
-|---|---|---|
-| **🎯 岗位匹配** | 129 条岗位秒级评分排序，优先级一目了然 | DeepSeek 结构化评分 |
-| **🧠 策略洞察** | 分析高频需求技能，给出投递优先级建议 | Python 词频分析 |
-| **📋 简历诊断** | 针对具体 JD 给出可落地的逐条改写建议 | DeepSeek 多维分析 |
-| **🎤 面试备考** | 生成高概率面试题 + 应答要点 + 弱点预警 | DeepSeek 角色扮演 |
-| **📈 投递追踪** | 可视化全链路进度，从投递到 Offer | 数据可视化 |
+    # ── 解决方案模块 ──
+    st.markdown("### 全链路 AI 求职智能体")
+    m1, m2, m3, m4, m5 = st.columns(5)
+    for col, icon, title, desc in [
+        (m1, "🎯", "岗位匹配", "129 条岗位秒级评分，优先级一目了然"),
+        (m2, "🧠", "策略洞察", "高频需求技能分析，投递优先级建议"),
+        (m3, "📋", "简历诊断", "针对具体 JD 的逐条改写建议"),
+        (m4, "🎤", "面试备考", "高频面试题 + 应答要点 + 弱点预警"),
+        (m5, "📈", "投递追踪", "全链路进度可视化，从投递到 Offer"),
+    ]:
+        col.metric(f"{icon} {title}", "", desc)
 
-### 数据说明
+    st.divider()
 
-- **129 条真实岗位**：通过 Playwright 自动爬取自 Boss直聘 + 实习僧，非模拟数据
-- **投递追踪**：18 条覆盖完整求职漏斗的示例记录
+    # ── 技术 & 数据 ──
+    t1, t2 = st.columns(2)
+    with t1:
+        st.markdown("**🤖 AI 选型：DeepSeek Chat V3**（via OpenRouter）")
+        st.markdown("- 中文语义理解强，精准识别 JD ↔ 简历匹配度\n- 结构化 JSON 输出，评分格式稳定\n- 成本极低（约 ¥0.1/千次），支持批量分析")
+        st.markdown("**📊 核心评分权重**")
+        for label, w in [("岗位方向匹配", 25), ("技能匹配", 35), ("经验匹配", 25), ("教育背景", 15)]:
+            st.progress(w / 100, text=f"{label}  {w}%")
+    with t2:
+        st.markdown("**📦 数据来源**")
+        st.success("129 条真实岗位：Playwright 爬取自 Boss直聘 + 实习僧")
+        st.info("18 条投递追踪记录：覆盖完整求职漏斗（待投递 → Offer）")
+        st.markdown("**🔧 技术栈**")
+        st.code("Python · Streamlit · OpenRouter API\nPlaywright（爬虫，已归档）· DeepSeek V3", language="text")
 
-### AI 工具选型
+    st.divider()
 
-**DeepSeek Chat V3**（通过 OpenRouter 调用）
-- 中文理解能力强，可精准识别 JD 与简历的语义匹配
-- 支持结构化 JSON 输出，确保评分格式稳定
-- 成本极低（约 ¥0.1/千次），支持 129 条岗位批量分析
-
-### 核心评分逻辑
-
-```
-岗位方向匹配  25%
-技能匹配      35%
-经验匹配      25%
-教育背景      15%
-```
-
-### 迭代记录
-
+    # ── 迭代记录（折叠，节省空间）──
+    with st.expander("📋 版本迭代记录", expanded=False):
+        st.markdown("""
 | 版本 | 主要功能 |
 |---|---|
 | v1 | FastAPI 后端 + 原生 JS，支持真实爬虫自动投递 |
 | v2 | Streamlit 重构，接入 AI 匹配 + 简历诊断 |
 | v3 | 新增打招呼生成、面试备考、策略洞察、一键体验 |
-| v4（当前）| UI 精简：去除冗余控件，优化信息层级与交互流 |
+| v4 | UI 精简：去除冗余控件，优化信息层级与交互流 |
+| v5（当前）| UX 强化：空状态引导、主色重设计、Tab4 视觉化重构 |
 """)
