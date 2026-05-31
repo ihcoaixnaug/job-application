@@ -7,6 +7,7 @@ import os
 import re
 import tempfile
 from collections import Counter
+from datetime import date as _date
 from pathlib import Path
 
 import streamlit as st
@@ -14,7 +15,11 @@ import streamlit as st
 from company_tiers import get_company_tier
 from matcher import diagnose_resume, generate_greeting, generate_interview_prep, match_jobs
 from resume_parser import parse_docx
-from tracker import add_job_from_match, add_job_manual, get_all_jobs as get_tracking_jobs, update_status
+from tracker import (
+    add_job_from_match, add_job_manual, add_timeline_event,
+    delete_job, get_all_jobs as get_tracking_jobs, update_status,
+    STATUS_LABELS,
+)
 
 def _esc(s: object) -> str:
     """HTML-escape a value for safe injection into card HTML."""
@@ -99,9 +104,9 @@ st.markdown("""
 .bd-sml{background:#f3f4f6;color:#6b7280}
 .bd-boss{background:#1e293b;color:#fff}
 .bd-shix{background:#0ea5e9;color:#fff}
-/* 看板紧凑卡片最低高度，减少行间高度落差 */
-div[data-testid="stVerticalBlock"] .jc{min-height:130px;
-    display:flex;flex-direction:column;justify-content:space-between}
+/* 看板紧凑卡片 —— 独立 class，避免影响 Tab1 全卡片 */
+.jc-compact{min-height:140px;display:flex;flex-direction:column}
+.jc-compact .jc-pills{flex:1;align-content:flex-start}
 /* 看板列头 */
 .kb-hd{font-weight:700;font-size:.9em;display:flex;align-items:center;gap:6px;
        margin-bottom:4px}
@@ -164,8 +169,15 @@ def _job_card(job: dict, compact: bool = False) -> str:
     plat_html = {"boss":      '<span class="bd bd-boss">Boss</span>',
                  "shixiseng": '<span class="bd bd-shix">实习僧</span>'}.get(plat, "")
 
-    sc_cls  = "sc-hi" if score >= 80 else ("sc-mid" if score >= 65 else "sc-lo")
-    bar_cls = "bar-hi" if score >= 80 else ("bar-mid" if score >= 65 else "bar-lo")
+    # score=0 表示手动添加（无AI评分）—— 隐藏分数和进度条
+    has_score = score > 0
+    sc_cls    = "sc-hi" if score >= 80 else ("sc-mid" if score >= 65 else "sc-lo")
+    bar_cls   = "bar-hi" if score >= 80 else ("bar-mid" if score >= 65 else "bar-lo")
+    score_html = f'<span class="jc-score {sc_cls}">{score:.0f}</span>' if has_score else \
+                 '<span class="jc-score" style="color:#9ca3af;font-size:.8em">手动</span>'
+    bar_html   = (f'<div class="jc-bar-bg">'
+                  f'<div class="jc-bar {bar_cls}" style="width:{score}%"></div>'
+                  f'</div>') if has_score else ""
 
     highlights = (job.get("match_highlights") or [])[:3]
     concerns   = (job.get("match_concerns")   or [])[:2]
@@ -179,18 +191,19 @@ def _job_card(job: dict, compact: bool = False) -> str:
         if not highlights and not concerns and job.get("match_reason"):
             pills = f'<span class="jp jp-tip">💡 {_esc(job["match_reason"])[:60]}</span>'
 
+    card_cls = "jc jc-compact" if compact else "jc"
     return (
-        f'<div class="jc">'
+        f'<div class="{card_cls}">'
         f'<div class="jc-hd">'
         f'<span class="jc-title">{_esc(job.get("title",""))}</span>'
-        f'<span class="jc-score {sc_cls}">{score:.0f}</span>'
+        f'{score_html}'
         f'</div>'
         f'<div class="jc-meta">'
         f'<span>{_esc(job.get("company",""))}</span>{tier_html}{plat_html}'
         f'<span>·</span><span>{_esc(salary)}</span>'
         f'<span>·</span><span>{_esc(city)}</span>'
         f'</div>'
-        f'<div class="jc-bar-bg"><div class="jc-bar {bar_cls}" style="width:{score}%"></div></div>'
+        f'{bar_html}'
         f'<div class="jc-pills">{pills}</div>'
         f'</div>'
     )
@@ -563,10 +576,9 @@ with tab1:
                     st.toast(f"已将「{job.get('title', '')}」加入投递追踪 📋")
                     st.rerun()
 
-        # 可展开：打招呼文案
+        # 可展开：打招呼文案（st.code 自带复制按钮）
         if existing_greeting and st.session_state.get(f"expand_g_{job_uid}"):
-            st.text_area("打招呼文案", value=existing_greeting, height=70,
-                         key=f"g_ta_{job_uid}", label_visibility="collapsed")
+            st.code(existing_greeting, language=None)
 
         # 可展开：岗位详情
         if st.session_state.get(f"expand_d_{job_uid}"):
@@ -603,7 +615,6 @@ with tab1:
 # ────────────────────────────────────────────────────────────────────────────────
 with tab2:
     st.subheader("📋 简历诊断 · 改写建议 · 面试备考")
-    st.write("选择目标岗位，AI 一站式诊断简历差距、给出改写建议、生成面试备考题。")
 
     diag_jobs = st.session_state.matched_jobs or load_jobs()
     diag_jobs_sorted = sorted(diag_jobs, key=lambda x: x.get("match_score", 0), reverse=True)[:50]
@@ -615,6 +626,9 @@ with tab2:
     selected_label = st.selectbox("选择目标岗位", list(job_options.keys()))
     selected_job = job_options[selected_label]
     cur_job_id = str(selected_job.get("job_id") or selected_job.get("id", ""))
+
+    # ── 目标岗位摘要 ──
+    st.markdown(_job_card(selected_job, compact=False), unsafe_allow_html=True)
 
     ready = bool(st.session_state.resume_text and st.session_state.api_key)
 
@@ -742,22 +756,80 @@ _KANBAN_STAGES = [
     ("🎉", "Offer",    ["offer"],                              "#10B981"),
 ]
 
+_TL_STATUS_OPTIONS = [
+    "待投递", "已投递", "HR已查看", "沟通中",
+    "一面", "二面", "三面", "终面", "等待结果",
+    "收到Offer", "已拒绝",
+]
+
 @st.dialog("📅 投递时间线")
 def _show_timeline(job: dict):
-    st.markdown(f"**{job.get('company', '')}** · {job.get('title', '')}")
-    st.caption(f"{score_color(job.get('match_score', 0))} {job.get('match_score', 0):.0f}分 · {job.get('salary') or '薪资面议'}")
+    jid = str(job["job_id"])
+    score = job.get("match_score", 0)
+
+    col_title, col_score = st.columns([4, 1])
+    with col_title:
+        st.markdown(f"**{job.get('company', '')}** · {job.get('title', '')}")
+        st.caption(f"{job.get('salary') or '薪资面议'} · {(job.get('location') or '').split('-')[0]}")
+    with col_score:
+        if score > 0:
+            sc_color = "#10b981" if score >= 80 else ("#f59e0b" if score >= 65 else "#ef4444")
+            st.markdown(
+                f"<div style='text-align:right;font-size:1.6em;font-weight:800;color:{sc_color}'>"
+                f"{score:.0f}</div>",
+                unsafe_allow_html=True,
+            )
+
     st.divider()
-    timeline = job.get("timeline") or []
+
+    # ── 时间线记录 ──
+    # 重新从 DB 拉取，确保显示最新数据
+    fresh_jobs = get_tracking_jobs()
+    fresh_job  = next((j for j in fresh_jobs if str(j["job_id"]) == jid), job)
+    timeline   = fresh_job.get("timeline") or []
     if timeline:
-        for ev in timeline:
-            tl_icon = TIMELINE_ICONS.get(ev.get("status", ""), "•")
+        for ev in reversed(timeline):   # 最新在上
+            tl_icon  = TIMELINE_ICONS.get(ev.get("status", ""), "•")
             note_str = f" — {ev['note']}" if ev.get("note") else ""
             st.write(f"`{ev['date']}` {tl_icon} **{ev['status']}**{note_str}")
     else:
         st.info("暂无时间线记录")
+
     if job.get("match_reason"):
-        st.divider()
         st.info(f"💡 {job['match_reason']}")
+
+    st.divider()
+
+    # ── 添加进展记录 ──
+    st.markdown("**➕ 添加进展记录**")
+    with st.form(f"tl_form_{jid}", border=False):
+        tl_c1, tl_c2, tl_c3 = st.columns([2, 2, 3])
+        ev_date   = tl_c1.date_input("日期", value=_date.today(), label_visibility="collapsed")
+        ev_status = tl_c2.selectbox("状态", _TL_STATUS_OPTIONS, label_visibility="collapsed")
+        ev_note   = tl_c3.text_input("备注（可选）", placeholder="如：HR约面，周四上午", label_visibility="collapsed")
+        if st.form_submit_button("✅ 记录", use_container_width=True, type="primary"):
+            add_timeline_event(jid, ev_status, ev_note, str(ev_date))
+            st.toast("已记录进展 📅")
+            st.rerun()
+
+    st.divider()
+
+    # ── 删除岗位（二次确认）──
+    if not st.session_state.get(f"confirm_del_{jid}"):
+        if st.button("🗑️ 从追踪中移除此岗位", use_container_width=True):
+            st.session_state[f"confirm_del_{jid}"] = True
+            st.rerun()
+    else:
+        st.warning("⚠️ 确认移除？此操作不可撤销，时间线记录一并删除。")
+        cc1, cc2 = st.columns(2)
+        if cc1.button("✅ 确认移除", type="primary", use_container_width=True, key=f"del_yes_{jid}"):
+            delete_job(jid)
+            st.session_state.pop(f"confirm_del_{jid}", None)
+            st.toast("已移除 🗑️")
+            st.rerun()
+        if cc2.button("取消", use_container_width=True, key=f"del_no_{jid}"):
+            st.session_state.pop(f"confirm_del_{jid}", None)
+            st.rerun()
 
 
 def _move_job(job_uid: str, old_status: str):
@@ -859,11 +931,16 @@ with tab3:
             _dialog_add_from_pool()
 
     # ── 关键指标 ──
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("📤 已投递", sum(counts.get(s, 0) for s in ["applied", "viewed", "chatting", "interview", "final_interview", "waiting", "offer"]))
+    _applied_cnt  = sum(counts.get(s, 0) for s in ["applied", "viewed", "chatting", "interview", "final_interview", "waiting", "offer"])
+    _interview_cnt = sum(counts.get(s, 0) for s in ["interview", "final_interview", "waiting", "offer"])
+    _offer_cnt    = counts.get("offer", 0)
+    _iv_rate      = f"{_interview_cnt/_applied_cnt*100:.0f}%" if _applied_cnt else "—"
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("📤 已投递", _applied_cnt)
     k2.metric("💬 面试中", sum(counts.get(s, 0) for s in ["interview", "final_interview"]))
     k3.metric("⏳ 等待结果", counts.get("waiting", 0))
-    k4.metric("🎉 Offer", counts.get("offer", 0))
+    k4.metric("🎉 Offer", _offer_cnt)
+    k5.metric("📈 面试率", _iv_rate)
 
     # ── 漏斗进度条 ──
     _funnel = [
@@ -878,10 +955,27 @@ with tab3:
 
     st.divider()
 
+    # ── 看板搜索 ──
+    kb_search = st.text_input(
+        "搜索看板",
+        placeholder="🔍 按公司名或岗位名过滤…",
+        label_visibility="collapsed",
+        key="kb_search",
+    )
+
     # ── 看板：逐行渲染，保证跨列对齐 ──────────────────────────────────────────
-    # 1. 先按列整理好卡片列表
+    # 1. 先按列整理好卡片列表（应用搜索过滤）
+    _kb_kw = kb_search.strip().lower()
     _stage_job_lists = [
-        [j for j in track_jobs if j.get("status") in stage_statuses]
+        [
+            j for j in track_jobs
+            if j.get("status") in stage_statuses
+            and (
+                not _kb_kw
+                or _kb_kw in (j.get("title") or "").lower()
+                or _kb_kw in (j.get("company") or "").lower()
+            )
+        ]
         for (_, _, stage_statuses, _) in _KANBAN_STAGES
     ]
 
@@ -1004,7 +1098,13 @@ with tab4:
         st.success("129 条真实岗位：Playwright 爬取自 Boss直聘 + 实习僧")
         st.info("18 条投递追踪记录：覆盖完整求职漏斗（待投递 → Offer）")
         st.markdown("**🔧 技术栈**")
-        st.code("Python · Streamlit · OpenRouter API\nPlaywright（爬虫，已归档）· DeepSeek V3", language="text")
+        st.code(
+            "前端：Python · Streamlit\n"
+            "AI：OpenRouter API · DeepSeek V3\n"
+            "持久化：SQLite（投递追踪）\n"
+            "数据采集：Playwright 爬取 Boss直聘 + 实习僧",
+            language="text",
+        )
 
     st.divider()
 
@@ -1020,5 +1120,6 @@ with tab4:
 | v5 | UX 强化：空状态引导、主色重设计、Tab4 视觉化重构 |
 | v6 | 看板增强：卡片 CSS 对标参考设计，增加分数进度条、胶囊标签、徽章系统 |
 | v7 | 安全与交互：XSS 转义、API Key 脱敏显示、SQLite 看板可拖动更新 |
-| v8（当前）| 全面优化：首屏引导横幅、卡片列表分页（每页20条）、Tab1→Tab3「加入追踪」联动、简历诊断/面试备考子 Tab、岗位详情 Markdown 渲染 |
+| v8 | 全面优化：首屏引导横幅、卡片列表分页（每页20条）、Tab1→Tab3「加入追踪」联动、简历诊断/面试备考子 Tab、岗位详情 Markdown 渲染 |
+| v9（当前）| 交互完善：时间线弹窗支持手动添加进展 + 删除岗位；看板逐行对齐 + 搜索过滤 + 面试率指标；手动添加岗位卡片隐藏0分；打招呼文案一键复制；Tab2 展示目标岗位摘要卡片 |
 """)

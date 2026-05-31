@@ -195,6 +195,35 @@ def add_job_manual(
     return jid
 
 
+def add_timeline_event(
+    job_id: str,
+    event_status: str,
+    note: str = "",
+    event_date: str | None = None,
+) -> None:
+    """Append a manual timeline entry for a job."""
+    today = event_date or date.today().isoformat()
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO tracking_timeline (job_id, event_date, event_status, note) "
+            "VALUES (?,?,?,?)",
+            (job_id, today, event_status, note),
+        )
+        conn.execute(
+            "UPDATE tracking_jobs SET updated_at=? WHERE job_id=?",
+            (today, job_id),
+        )
+        conn.commit()
+
+
+def delete_job(job_id: str) -> None:
+    """Remove a job and all its timeline events from tracking."""
+    with _conn() as conn:
+        conn.execute("DELETE FROM tracking_timeline WHERE job_id=?", (job_id,))
+        conn.execute("DELETE FROM tracking_jobs WHERE job_id=?", (job_id,))
+        conn.commit()
+
+
 def reset_db() -> None:
     """Drop all data and re-seed from the demo JSON (for dev resets)."""
     DB_PATH.unlink(missing_ok=True)
