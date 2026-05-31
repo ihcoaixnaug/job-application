@@ -341,25 +341,19 @@ TIMELINE_ICONS = {
 
 # ── 侧边栏 ──────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    # API Key：配置后只显示状态，不再回显密钥
-    if st.session_state.api_key:
-        col_ok, col_rst = st.columns([3, 1])
-        col_ok.success("✅ API Key 已配置")
-        if col_rst.button("重置", key="reset_api"):
-            set_api_key("")
-            st.rerun()
-    else:
-        api_key_input = st.text_input(
-            "OpenRouter API Key",
-            value="",
-            type="password",
-            placeholder="sk-or-v1-...",
-            help="在 openrouter.ai 免费注册获取，支持 DeepSeek / Claude / GPT 等模型",
-        )
-        if api_key_input:
-            set_api_key(api_key_input)
-            st.rerun()
-        st.caption("⚠️ 未配置，将展示示例匹配分数")
+    # API Key 输入框（始终显示，已配置时 placeholder 提示即可）
+    _key_set = bool(st.session_state.api_key)
+    api_key_input = st.text_input(
+        "OpenRouter API Key",
+        value="",
+        type="password",
+        placeholder="已配置，输入新 Key 可覆盖" if _key_set else "sk-or-v1-...",
+        help="在 openrouter.ai 免费注册获取，支持 DeepSeek / Claude / GPT 等模型",
+    )
+    if api_key_input:
+        set_api_key(api_key_input)
+        st.rerun()
+    st.caption("✅ 已配置" if _key_set else "⚠️ 未配置，将展示示例匹配分数")
 
     st.divider()
 
