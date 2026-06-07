@@ -3001,6 +3001,41 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                 st.session_state.resume_text = _rt
 
         elif _step == 1:
+            # JS 直接操作父文档 DOM，设置 inline style 绕过 emotion CSS
+            import streamlit.components.v1 as _cv1
+            _cv1.html("""<script>
+(function(){
+  var RED = 'rgba(214,70,53,.45)';
+  var RED_BG = 'rgba(214,70,53,.03)';
+  function applyRed(){
+    var doc = window.parent.document;
+    var wrappers = doc.querySelectorAll('[data-testid="stVerticalBlockBorderWrapper"]');
+    wrappers.forEach(function(w){
+      var boxes = w.querySelectorAll('[data-baseweb="input"],[data-baseweb="textarea"]');
+      boxes.forEach(function(b){
+        b.style.setProperty('border','1.5px solid '+RED,'important');
+        b.style.setProperty('border-radius','8px','important');
+        b.style.setProperty('background-color',RED_BG,'important');
+      });
+      w.addEventListener('focusin',function(e){
+        var box=e.target.closest('[data-baseweb="input"],[data-baseweb="textarea"]');
+        if(box){box.style.setProperty('border','2px solid #d64635','important');
+                 box.style.setProperty('box-shadow','0 0 0 3px rgba(214,70,53,.15)','important');}
+      },true);
+      w.addEventListener('focusout',function(e){
+        var box=e.target.closest('[data-baseweb="input"],[data-baseweb="textarea"]');
+        if(box){box.style.setProperty('border','1.5px solid '+RED,'important');
+                 box.style.setProperty('box-shadow','none','important');}
+      },true);
+    });
+  }
+  applyRed();
+  [100,300,800,2000].forEach(function(t){setTimeout(applyRed,t);});
+  new MutationObserver(applyRed).observe(
+    window.parent.document.body,{childList:true,subtree:true}
+  );
+})();
+</script>""", height=0, scrolling=False)
 
             st.markdown('<div class="pw-note"><b>说明：</b>个人信息仅用于 AI 岗位推荐，不会对外共享。</div>', unsafe_allow_html=True)
 
