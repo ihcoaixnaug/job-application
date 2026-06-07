@@ -2957,19 +2957,95 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                 st.session_state.resume_text = _rt
 
         elif _step == 1:
-            st.markdown('<div class="pw-flbl">手机号</div>', unsafe_allow_html=True)
-            _ph = st.text_input("", value=st.session_state.get("prof_phone", ""),
-                                placeholder="138xxxxxxxx", label_visibility="collapsed", key="pi_phone")
-            st.session_state.prof_phone = _ph
-            st.markdown('<div class="pw-flbl">所在城市</div>', unsafe_allow_html=True)
-            _lc = st.text_input("", value=st.session_state.get("prof_location", ""),
-                                placeholder="如：北京", label_visibility="collapsed", key="pi_loc")
-            st.session_state.prof_location = _lc
-            st.markdown('<div class="pw-flbl">一句话简介</div>', unsafe_allow_html=True)
-            _bi = st.text_input("", value=st.session_state.get("prof_bio", ""),
-                                placeholder="如：应用经济学硕士，擅长数据分析",
-                                label_visibility="collapsed", key="pi_bio")
-            st.session_state.prof_bio = _bi
+            st.markdown("""<style>
+.pw-section {
+    background:#fff; border:1px solid rgba(39,41,55,.08); border-radius:14px;
+    padding:20px 22px; margin-bottom:16px;
+}
+.pw-section-hdr {
+    display:flex; align-items:center; gap:8px;
+    font-size:.9rem; font-weight:700; color:#272937;
+    margin-bottom:18px; padding-bottom:14px;
+    border-bottom:1px solid rgba(39,41,55,.06);
+}
+.pw-section-hdr svg { flex-shrink:0; }
+.pw-link-row {
+    display:flex; align-items:center; gap:10px;
+    padding:10px 0; border-bottom:1px solid rgba(39,41,55,.05);
+}
+.pw-link-row:last-child { border-bottom:none; padding-bottom:0; }
+.pw-link-icon {
+    width:32px; height:32px; border-radius:8px; flex-shrink:0;
+    background:rgba(39,41,55,.06);
+    display:flex; align-items:center; justify-content:center;
+}
+.pw-link-label { font-size:.8rem; font-weight:600; color:#272937; width:72px; flex-shrink:0; }
+</style>""", unsafe_allow_html=True)
+
+            st.markdown('<div class="pw-note"><b>说明：</b>个人信息仅用于 AI 岗位推荐，不会对外共享。</div>', unsafe_allow_html=True)
+
+            # ── 个人信息 section ──────────────────────────────────────────────
+            st.markdown("""<div class="pw-section">
+<div class="pw-section-hdr">
+  <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="#272937" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+  个人信息
+</div>""", unsafe_allow_html=True)
+            _c1, _c2 = st.columns(2)
+            with _c1:
+                st.markdown('<div class="pw-flbl">姓 <span style="color:#d64635">*</span></div>', unsafe_allow_html=True)
+                _ln = st.text_input("", value=st.session_state.get("prof_lastname", ""),
+                                    placeholder="如：管", label_visibility="collapsed", key="pi_ln")
+                st.session_state.prof_lastname = _ln
+            with _c2:
+                st.markdown('<div class="pw-flbl">名 <span style="color:#d64635">*</span></div>', unsafe_allow_html=True)
+                _fn = st.text_input("", value=st.session_state.get("prof_firstname", ""),
+                                    placeholder="如：笑池", label_visibility="collapsed", key="pi_fn")
+                st.session_state.prof_firstname = _fn
+            _c3, _c4 = st.columns(2)
+            with _c3:
+                st.markdown('<div class="pw-flbl">邮箱</div>', unsafe_allow_html=True)
+                _em = st.text_input("", value=st.session_state.get("prof_email", ""),
+                                    placeholder="your@email.com", label_visibility="collapsed", key="pi_em")
+                st.session_state.prof_email = _em
+            with _c4:
+                st.markdown('<div class="pw-flbl">手机号</div>', unsafe_allow_html=True)
+                _ph = st.text_input("", value=st.session_state.get("prof_phone", ""),
+                                    placeholder="+86 138xxxxxxxx", label_visibility="collapsed", key="pi_phone")
+                st.session_state.prof_phone = _ph
+            _c5, _c6 = st.columns(2)
+            with _c5:
+                st.markdown('<div class="pw-flbl">所在城市</div>', unsafe_allow_html=True)
+                _lc = st.text_input("", value=st.session_state.get("prof_location", ""),
+                                    placeholder="如：北京", label_visibility="collapsed", key="pi_loc")
+                st.session_state.prof_location = _lc
+            with _c6:
+                st.markdown('<div class="pw-flbl">一句话简介</div>', unsafe_allow_html=True)
+                _bi = st.text_input("", value=st.session_state.get("prof_bio", ""),
+                                    placeholder="如：应用经济学硕士，擅长数据分析",
+                                    label_visibility="collapsed", key="pi_bio")
+                st.session_state.prof_bio = _bi
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            # ── 专业链接 section ──────────────────────────────────────────────
+            st.markdown("""<div class="pw-section">
+<div class="pw-section-hdr">
+  <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="#272937" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+  专业链接
+</div>""", unsafe_allow_html=True)
+            _lk_github = st.text_input("GitHub", value=st.session_state.get("prof_github", ""),
+                                       placeholder="https://github.com/yourname", key="pi_github")
+            st.session_state.prof_github = _lk_github
+            _lk_portfolio = st.text_input("作品集 / 个人网站", value=st.session_state.get("prof_portfolio", ""),
+                                          placeholder="https://your-portfolio.com", key="pi_portfolio")
+            st.session_state.prof_portfolio = _lk_portfolio
+            _lk_linkedin = st.text_input("LinkedIn（选填）", value=st.session_state.get("prof_linkedin", ""),
+                                         placeholder="https://linkedin.com/in/yourname", key="pi_linkedin")
+            st.session_state.prof_linkedin = _lk_linkedin
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            # 更新完成标志
+            st.session_state["prof_phone"] = st.session_state.get("prof_phone", "")
+            st.session_state["prof_location"] = st.session_state.get("prof_location", "")
 
         elif _step == 2:
             st.markdown('<div class="pw-flbl">学校</div>', unsafe_allow_html=True)
