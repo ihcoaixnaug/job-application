@@ -1,6 +1,5 @@
 """Offer捕手 — AI 求职全链路助手（Streamlit 前端）"""
 import asyncio
-import hashlib
 import html as _html
 import json
 import os
@@ -14,7 +13,7 @@ import streamlit as st
 
 from company_tiers import get_company_tier
 from matcher import diagnose_resume, generate_greeting, generate_interview_prep, match_jobs
-from resume_parser import parse_docx
+from resume_parser import parse_resume
 from tracker import (
     add_job_from_match, add_job_manual, add_timeline_event,
     delete_job, get_all_jobs as get_tracking_jobs, update_status,
@@ -77,6 +76,32 @@ SAMPLE_RESUME = """教育背景
 技能
 Python（Pandas/Sklearn）、SQL、R、Excel、Tableau、A/B 测试、用户分层、因果推断"""
 
+def _load_sample_matched_jobs() -> list:
+    """从 DB 读取已有 match_score 的岗位作为示例匹配结果，避免演示时需要等待 AI。"""
+    import json as _json
+    try:
+        import sqlite3 as _sq3, os as _os
+        _db = _os.path.join(_os.path.dirname(__file__), "data", "jobs.db")
+        _conn = _sq3.connect(_db)
+        _conn.row_factory = _sq3.Row
+        _rows = _conn.execute(
+            "SELECT * FROM jobs WHERE match_score IS NOT NULL ORDER BY match_score DESC LIMIT 30"
+        ).fetchall()
+        _conn.close()
+        _out = []
+        for _r in _rows:
+            _d = dict(_r)
+            for _f in ("match_highlights", "match_concerns"):
+                if isinstance(_d.get(_f), str):
+                    try: _d[_f] = _json.loads(_d[_f])
+                    except Exception: _d[_f] = []
+            _out.append(_d)
+        return _out
+    except Exception:
+        return []
+
+SAMPLE_MATCHED_JOBS = _load_sample_matched_jobs()
+
 SKILL_KEYWORDS = [
     "Python", "SQL", "Excel", "R语言", "Tableau", "Power BI",
     "数据分析", "数据运营", "用户运营", "内容运营", "增长运营", "策略运营",
@@ -90,7 +115,7 @@ st.set_page_config(
     page_title="Offer捕手",
     page_icon="捕",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ── 全局样式 ────────────────────────────────────────────────────────────────────
@@ -106,10 +131,68 @@ html, body, [class*="css"], .stApp, .stMarkdown {
 }
 
 /* ══ 布局 & 背景 ══ */
-.stApp { background: #efece8 !important; }
-header[data-testid="stHeader"] { background: rgba(239,236,232,.96) !important; border-bottom: 1px solid rgba(39,41,55,.08) !important; backdrop-filter: blur(10px); }
-section[data-testid="stSidebar"] > div:first-child { background: #efece8 !important; padding-top: 1.5rem; border-right: 1px solid rgba(39,41,55,.08); }
-.block-container { padding-top: 2rem !important; padding-bottom: 4rem !important; }
+.stApp { background: #f5f5f4 !important; }
+header[data-testid="stHeader"] { display:none!important; }
+section[data-testid="stSidebar"] { display:none!important; }
+.block-container { padding-top: 76px !important; padding-bottom: 4rem !important; max-width:1140px!important; padding-left:2.5rem!important; padding-right:2.5rem!important; }
+
+/* ══ 顶部导航栏 ══ */
+.app-nav {
+  position:fixed; top:0; left:0; right:0; z-index:9999;
+  height:60px; background:rgba(255,255,255,.97);
+  backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  border-bottom:1px solid rgba(39,41,55,.07);
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 32px; box-shadow:0 1px 12px rgba(39,41,55,.06);
+}
+/* Logo */
+.app-nav-brand { display:flex; align-items:center; gap:0; text-decoration:none!important; }
+.app-nav-brand-name {
+  font-family:'DM Serif Display',serif; font-style:italic; font-weight:400;
+  font-size:1.32rem; line-height:1; letter-spacing:-.01em; text-decoration:none!important;
+}
+.app-nav-brand-name .brand-offer { color:#d64635; }
+.app-nav-brand-name .brand-catch { color:#272937; }
+/* Center nav links */
+.app-nav-links { display:flex; align-items:center; gap:1px; }
+.app-nav-link {
+  display:flex; align-items:center; gap:6px; padding:7px 14px; border-radius:8px;
+  font-size:.83rem; font-weight:500; color:rgba(39,41,55,.52);
+  text-decoration:none!important; transition:all .15s ease; white-space:nowrap;
+}
+.app-nav-link:hover { color:#272937; background:rgba(39,41,55,.05); text-decoration:none!important; }
+.app-nav-link.nav-active {
+  color:#272937; background:rgba(39,41,55,.08); font-weight:600;
+  border-bottom:2px solid #d64635;
+}
+.app-nav-link.nav-active svg { stroke:#d64635; }
+/* Right cluster */
+.app-nav-right { display:flex; align-items:center; gap:4px; }
+.app-nav-icon-btn {
+  width:34px; height:34px; border-radius:8px; display:flex; align-items:center; justify-content:center;
+  color:rgba(39,41,55,.45); cursor:pointer; transition:all .15s; border:none; background:transparent;
+  text-decoration:none!important; flex-shrink:0;
+}
+.app-nav-icon-btn:hover { background:rgba(39,41,55,.06); color:#111; text-decoration:none!important; }
+/* Nav divider */
+.app-nav-divider { width:1px; height:28px; background:rgba(39,41,55,.1); margin:0 6px; flex-shrink:0; }
+.nav-user-btn {
+  display:flex; align-items:center; gap:9px; padding:5px 10px 5px 5px;
+  border-radius:10px; cursor:pointer; transition:background .15s;
+  background:transparent; border:none; text-decoration:none!important;
+}
+.nav-user-btn:hover { background:rgba(39,41,55,.05); }
+.app-nav-avatar {
+  width:32px; height:32px; border-radius:50%; background:#272937; color:#efece8;
+  display:flex; align-items:center; justify-content:center;
+  font-size:.72rem; font-weight:700; flex-shrink:0;
+}
+.nav-user-info { display:flex; flex-direction:column; align-items:flex-start; line-height:1; }
+.nav-user-name { font-size:.8rem; font-weight:600; color:#111; white-space:nowrap; }
+.nav-user-plan {
+  font-size:.66rem; color:rgba(39,41,55,.42); margin-top:2px;
+}
+.nav-user-caret { color:rgba(39,41,55,.35); flex-shrink:0; }
 
 /* ══ 标题 ══ */
 h1 { font-family:"DM Serif Display",serif!important; font-size:1.45rem!important; font-weight:400!important; letter-spacing:-.02em!important; line-height:1.3!important; color:#272937!important; }
@@ -276,6 +359,146 @@ def _job_card(job: dict, compact: bool = False) -> str:
     )
 
 
+def _job_card_v2(job: dict) -> str:
+    """Correlate AI 风格岗位卡片，用于岗位匹配页列表。"""
+    score   = job.get("match_score", 0)
+    company = job.get("company", "") or ""
+    title   = job.get("title", "")
+    salary  = job.get("salary") or "薪资面议"
+    city    = (job.get("location") or "").split("-")[0]
+    tier    = get_company_tier(company)
+    plat    = job.get("platform", "")
+
+    # 公司首字（优先汉字）
+    initial = next((ch for ch in company if "一" <= ch <= "鿿"), None)
+    if not initial:
+        initial = company[0].upper() if company else "?"
+
+    # logo 背景色按规模区分
+    logo_bg = "#1e2235" if tier == "大厂" else ("#2d3748" if tier == "中厂" else "#374151")
+
+    # 分数颜色
+    if score >= 80:
+        s_color, s_cls = "#2563eb", "jcv2-score-hi"
+    elif score >= 65:
+        s_color, s_cls = "#f59e0b", "jcv2-score-mid"
+    else:
+        s_color, s_cls = "#94a3b8", "jcv2-score-lo"
+    score_html = (f'<span class="{s_cls}">{score:.0f}</span>' if score > 0
+                  else '<span class="jcv2-score-lo" style="font-size:.8rem">手动</span>')
+
+    # 标签
+    highlights = (job.get("match_highlights") or [])[:2]
+    concerns   = (job.get("match_concerns")   or [])[:1]
+    tags  = "".join(f'<span class="tag-hi">✓ {_esc(h)}</span>' for h in highlights)
+    tags += "".join(f'<span class="tag-lo">△ {_esc(c)}</span>' for c in concerns)
+    if tier in ("大厂", "中厂", "小厂"):
+        tags += f'<span class="tag-tier">{tier}</span>'
+    plat_label = {"boss": "Boss直聘", "shixiseng": "实习僧"}.get(plat, "")
+    if plat_label:
+        tags += f'<span class="tag-plat">{plat_label}</span>'
+
+    return f"""<div class="jcv2">
+  <div class="jcv2-top">
+    <div class="jcv2-logo" style="background:{logo_bg}">{_esc(initial)}</div>
+    <div class="jcv2-body">
+      <div class="jcv2-title-row">
+        <span class="jcv2-title">{_esc(title)}</span>
+        {score_html}
+      </div>
+      <div class="jcv2-meta">{_esc(company)} · {_esc(city)} · {_esc(salary)}</div>
+      <div class="jcv2-tags">{tags}</div>
+    </div>
+  </div>
+</div>"""
+
+
+def _job_detail_panel(job: dict) -> str:
+    """Correlate AI 风格两栏 JD 详情面板（左：内容，右：About 元数据）。"""
+    desc  = (job.get("description")   or "").strip()
+    req   = (job.get("requirements")  or "").strip()
+    score = job.get("match_score", 0)
+    city  = _esc((job.get("location") or "").split("-")[0])
+    tier  = get_company_tier(job.get("company", ""))
+    plat_label = {"boss": "Boss直聘", "shixiseng": "实习僧"}.get(job.get("platform", ""), "—")
+
+    def _sec(icon_path: str, title: str, body: str) -> str:
+        return f"""<div style="margin-bottom:20px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <div style="width:28px;height:28px;border-radius:7px;background:rgba(37,99,235,.1);
+         display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2563eb"
+           stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        {icon_path}
+      </svg>
+    </div>
+    <span style="font-size:.95rem;font-weight:700;color:#0f172a">{title}</span>
+  </div>
+  <div style="font-size:.83rem;color:#475569;line-height:1.8;white-space:pre-line">{_esc(body)}</div>
+</div>"""
+
+    left = ""
+    if desc:
+        left += _sec('<path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>',
+                     "岗位描述", desc[:600] + ("…" if len(desc) > 600 else ""))
+    if req:
+        left += _sec('<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>',
+                     "岗位要求", req[:500] + ("…" if len(req) > 500 else ""))
+    if not left:
+        left = '<div style="color:#94a3b8;font-size:.84rem;padding:8px 0">暂无岗位详情</div>'
+
+    # Keywords pills
+    highlights = (job.get("match_highlights") or [])[:5]
+    concerns   = (job.get("match_concerns")   or [])[:3]
+    kw_html = "".join(
+        f'<span style="font-size:.73rem;padding:4px 11px;border-radius:99px;'
+        f'border:1.5px solid #bbf7d0;color:#15803d;background:#fff">{_esc(h)}</span>'
+        for h in highlights
+    ) + "".join(
+        f'<span style="font-size:.73rem;padding:4px 11px;border-radius:99px;'
+        f'border:1.5px solid #fecaca;color:#dc2626;background:#fff">{_esc(c)}</span>'
+        for c in concerns
+    )
+
+    # Score color
+    sc = "#2563eb" if score >= 80 else ("#f59e0b" if score >= 65 else "#94a3b8")
+
+    def _arow(icon_path: str, label: str, val: str) -> str:
+        return f"""<div style="display:flex;align-items:center;gap:8px;padding:8px 0;
+     border-bottom:1px solid #f1f5f9;font-size:.83rem">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">{icon_path}</svg>
+  <span style="color:#94a3b8;width:60px;flex-shrink:0">{label}</span>
+  <span style="color:#0f172a;font-weight:600">{val}</span>
+</div>"""
+
+    about = f"""<div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:18px 20px">
+  <div style="font-size:.95rem;font-weight:700;color:#0f172a;margin-bottom:14px">About</div>
+  {_arow('<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>',
+         "地点", city)}
+  {_arow('<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>',
+         "薪资", _esc(job.get("salary") or "面议"))}
+  {_arow('<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/>',
+         "规模", tier)}
+  {_arow('<path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.01 1.18 2 2 0 012 .01h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 14.92z"/>',
+         "平台", _esc(plat_label))}
+  {f"""<div style="margin-top:16px;padding-top:14px;border-top:1px solid #f1f5f9">
+    <div style="font-size:.7rem;font-weight:700;color:#94a3b8;text-transform:uppercase;
+         letter-spacing:.07em;margin-bottom:8px">AI 匹配分析</div>
+    <div style="font-size:1.75rem;font-weight:800;color:{sc};line-height:1;margin-bottom:10px">{score:.0f} 分</div>
+    <div style="display:flex;flex-wrap:wrap;gap:5px">{kw_html}</div>
+  </div>""" if score > 0 else ""}
+</div>"""
+
+    return f"""<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;
+     margin:4px 0 16px;overflow:hidden">
+  <div style="display:grid;grid-template-columns:1fr 270px">
+    <div style="padding:22px 24px;border-right:1px solid #e2e8f0">{left}</div>
+    <div style="padding:20px">{about}</div>
+  </div>
+</div>"""
+
+
 # ── 数据加载 ────────────────────────────────────────────────────────────────────
 @st.cache_data
 def load_jobs() -> list[dict]:
@@ -351,6 +574,14 @@ def _init_state():
         "t1_page": 0,
         "_t1_sig": None,
         "show_landing": True,
+        "min_score": 60,
+        "filter_platforms": [],
+        "filter_tiers": [],
+        "filter_cities": [],
+        "sort_by_pref": "匹配分（高→低）",
+        "pref_categories": [],
+        "pref_subs": [],
+        "show_api_input": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -358,8 +589,21 @@ def _init_state():
 
 _init_state()
 
+_page = st.query_params.get("page", "dashboard")
+if _page not in ("dashboard", "jobs", "resume", "progress", "settings"):
+    _page = "dashboard"
+
 # ── 常量 ────────────────────────────────────────────────────────────────────────
 PLATFORM_NAME = {"boss": "Boss直聘", "shixiseng": "实习僧"}
+
+JOB_CATEGORIES = {
+    "运营": ["数据运营", "用户运营", "内容运营", "活动运营", "社群运营", "增长运营", "电商运营", "品牌运营"],
+    "产品": ["产品经理", "产品策划", "产品运营", "AI产品", "B端产品", "C端产品", "游戏策划"],
+    "数据": ["数据分析", "商业分析", "数据挖掘", "BI分析师", "数据产品", "算法工程师"],
+    "市场": ["市场营销", "品牌策划", "公关传播", "市场调研", "新媒体运营", "SEO/SEM"],
+    "技术": ["前端开发", "后端开发", "全栈开发", "算法研究", "数据工程", "测试开发", "移动开发"],
+    "咨询/金融": ["管理咨询", "投资分析", "战略规划", "财务分析", "审计", "研究员"],
+}
 
 STATUS_CONFIG = {
     "offer":           ("🎉", "Offer"),
@@ -390,6 +634,17 @@ if st.query_params.get("start") == "1":
     st.session_state.show_landing = False
     st.query_params.clear()
     st.rerun()
+
+if st.query_params.get("show_landing") == "1":
+    st.session_state.show_landing = True
+    st.query_params.clear()
+    st.rerun()
+
+# 如果 URL 中带有 page= 参数，说明用户从导航栏点击进入 App，
+# 无论 session_state 是否刚刚重置，都应跳过首页直接进入对应页面
+_url_page = st.query_params.get("page", "")
+if _url_page in ("dashboard", "jobs", "resume", "progress", "settings"):
+    st.session_state.show_landing = False
 
 if st.session_state.get("show_landing", True):
     st.markdown("""<style>
@@ -424,7 +679,7 @@ header[data-testid="stHeader"]   { display:none!important }
 .lp-cta { animation: lp-fadeup .85s cubic-bezier(.22,1,.36,1) .38s both; }
 
 /* ════ HERO ════ */
-.lp-hero { text-align:center; height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:0 0 0; background:radial-gradient(ellipse 90% 70% at 50% 40%, rgba(214,70,53,.07) 0%, transparent 60%); scroll-margin-top:0; }
+.lp-hero { text-align:center; height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:0; margin-top:-76px; background:radial-gradient(ellipse 90% 70% at 50% 40%, rgba(214,70,53,.07) 0%, transparent 60%); scroll-margin-top:0; }
 .lp-h1 { font-family:"DM Serif Display",serif; font-size:2.75rem; font-weight:400; letter-spacing:-.04em; line-height:1.15; color:#272937; margin:0 0 24px; }
 .lp-h1-accent { color:#d64635; }
 .lp-sub { font-size:1rem; line-height:1.9; color:rgba(39,41,55,.45); max-width:480px; margin:0 auto; text-align:center!important; }
@@ -511,7 +766,7 @@ html, section[data-testid="stMain"] { scroll-behavior:smooth !important; }
     # ── 固定导航栏 ──
     st.markdown("""
 <nav class="lp-nav">
-  <a class="lp-logo" href="#"><span style="font-family:'DM Serif Display',serif;font-style:italic;font-size:1.4rem;font-weight:400;color:#d64635;letter-spacing:-.01em;">Offer捕手</span></a>
+  <a class="lp-logo" href="#"><span style="font-family:'DM Serif Display',serif;font-style:italic;font-size:1.4rem;font-weight:400;letter-spacing:-.01em;"><span style="color:#d64635;">Offer</span><span style="color:#272937;">捕手</span></span></a>
   <div class="lp-links">
     <a href="#lp-home">首页</a>
     <a href="#lp-features">功能</a>
@@ -723,120 +978,163 @@ setTimeout(resizeFeatures,300);
 """, unsafe_allow_html=True)
 
     st.components.v1.html("""<!DOCTYPE html><html><head><meta charset="UTF-8">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#efece8;font-family:"Noto Serif SC","Songti SC","STSong","SimSun",serif;}
-.charts{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;padding:0 0 4px;}
-.chart{background:#fff;border:1px solid rgba(39,41,55,.08);border-radius:20px;padding:36px 28px 32px;}
-.ct{font-size:17px;font-weight:500;color:#272937;text-align:left;margin-bottom:28px;line-height:1.5;}
-.ca{display:flex;align-items:flex-end;gap:0;}
-.col{flex:5;display:flex;flex-direction:column;align-items:center;}
-.mid{flex:3;display:flex;align-items:center;justify-content:center;padding-bottom:48px;}
-.dlt{font-size:13px;font-weight:800;color:#d64635;background:rgba(214,70,53,.08);border:1px solid rgba(214,70,53,.2);border-radius:99px;padding:7px 13px;white-space:nowrap;}
-.bz{width:100%;height:180px;position:relative;display:flex;align-items:flex-end;justify-content:center;border-bottom:1.5px solid rgba(39,41,55,.07);}
-.bar{width:72px;border-radius:8px 8px 0 0;}
-.vb{position:absolute;left:0;right:0;text-align:center;font-size:15px;font-weight:600;color:rgba(39,41,55,.32);}
-.va{font-size:40px;font-weight:800;color:#d64635;letter-spacing:-.04em;line-height:1;margin-bottom:10px;}
-.lbl{font-size:14px;color:rgba(39,41,55,.32);margin-top:14px;text-align:center;}
-.lbl.hi{color:#d64635;font-weight:700;}
-</style></head><body>
-<div class="charts">
-  <div class="chart">
-    <p class="ct">精准岗位发现量<br>（条 / 周）</p>
-    <div class="ca">
-      <div class="col">
-        <div class="bz">
-          <div class="bar" style="height:18px;background:rgba(39,41,55,.1);"></div>
-          <span class="vb" style="bottom:22px;">20</span>
-        </div>
-        <div class="lbl">手动搜索</div>
-      </div>
-      <div class="mid"><div class="dlt">↑ +10×</div></div>
-      <div class="col">
-        <div class="va">200</div>
-        <div class="bz">
-          <div class="bar" style="height:180px;background:#d64635;"></div>
-        </div>
-        <div class="lbl hi">Offer 捕手</div>
-      </div>
-    </div>
+body{background:#efece8;font-family:"Noto Serif SC","Songti SC",serif;}
+/* 三列文字说明 */
+.stats-text{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:20px;margin-top:28px;}
+.st-item{}
+.st-title{font-size:15px;font-weight:700;color:#272937;margin-bottom:8px;}
+.st-desc{font-size:13px;color:rgba(39,41,55,.52);line-height:1.75;}
+/* 图表 */
+.charts{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
+.chart{background:#fff;border:1px solid rgba(39,41,55,.08);border-radius:20px;padding:24px 20px 16px;opacity:0;transform:translateY(16px);transition:opacity .5s ease,transform .5s ease;}
+.chart.show{opacity:1;transform:translateY(0);}
+.ct{font-size:13.5px;font-weight:600;color:#272937;margin-bottom:14px;line-height:1.45;}
+svg.cg{width:100%;display:block;}
+</style>
+</head><body>
+
+<!-- 三列文字说明 -->
+<div class="stats-text">
+  <div class="st-item">
+    <div class="st-title">精准岗位匹配</div>
+    <div class="st-desc">从每周 20 条泛投变为精准推荐 200+ 条高匹配岗位，命中率提升 10 倍。</div>
   </div>
-  <div class="chart">
-    <p class="ct">单次投递准备时间<br>（分钟）</p>
-    <div class="ca">
-      <div class="col">
-        <div class="va" style="font-size:36px;color:rgba(39,41,55,.35);">25</div>
-        <div class="bz">
-          <div class="bar" style="height:180px;background:rgba(39,41,55,.1);"></div>
-        </div>
-        <div class="lbl">手动准备</div>
-      </div>
-      <div class="mid"><div class="dlt">↓ −92%</div></div>
-      <div class="col">
-        <div class="bz">
-          <div class="bar" style="height:14px;background:#d64635;"></div>
-          <span class="vb" style="bottom:18px;">2</span>
-        </div>
-        <div class="lbl hi">Offer 捕手</div>
-      </div>
-    </div>
+  <div class="st-item">
+    <div class="st-title">投递效率跃升</div>
+    <div class="st-desc">单次投递从手动准备 25 分钟压缩至 2 分钟，节省 92% 的重复劳动。</div>
   </div>
-  <div class="chart">
-    <p class="ct">简历—JD 契合度</p>
-    <div class="ca">
-      <div class="col">
-        <div class="bz">
-          <div class="bar" style="height:80px;background:rgba(39,41,55,.1);"></div>
-          <span class="vb" style="bottom:84px;">40%</span>
-        </div>
-        <div class="lbl">凭感觉筛选</div>
-      </div>
-      <div class="mid"><div class="dlt">↑ ×2.2</div></div>
-      <div class="col">
-        <div class="va">90%</div>
-        <div class="bz">
-          <div class="bar" style="height:180px;background:#d64635;"></div>
-        </div>
-        <div class="lbl hi">Offer 捕手</div>
-      </div>
-    </div>
+  <div class="st-item">
+    <div class="st-title">简历契合度优化</div>
+    <div class="st-desc">AI 对标 JD 自动优化简历关键词，简历—岗位契合度从 40% 提升至 90%。</div>
   </div>
 </div>
+
+<!-- 三列图表 -->
+<div class="charts">
+
+<!-- ── Chart 1: 岗位发现量 ── -->
+<div class="chart">
+  <p class="ct">精准岗位发现量（条/周）</p>
+  <svg class="cg" viewBox="0 0 260 222" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="ga" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#d64635" stop-opacity=".82"/>
+        <stop offset="100%" stop-color="#d64635" stop-opacity=".20"/>
+      </linearGradient>
+      <marker id="mka" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+        <path d="M1,1.5 L8,5 L1,8.5" fill="none" stroke="#d64635" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </marker>
+    </defs>
+    <line x1="8" y1="172" x2="252" y2="172" stroke="rgba(39,41,55,.06)" stroke-width="1.2"/>
+    <!-- left bar: tiny -->
+    <rect x="12" y="163" width="52" height="9" rx="4" fill="rgba(39,41,55,.1)"/>
+    <!-- right bar: tall -->
+    <rect x="196" y="26" width="52" height="146" rx="6" fill="url(#ga)"/>
+    <!-- value labels -->
+    <text x="38" y="157" text-anchor="middle" font-size="13" font-weight="600" fill="rgba(39,41,55,.30)">20</text>
+    <text x="222" y="20" text-anchor="middle" font-size="20" font-weight="800" fill="#d64635" letter-spacing="-0.5">200</text>
+    <!-- diagonal arc: starts lower-left, sweeps up-right; pill at upper-left safely avoids -->
+    <path d="M 64,172 C 105,82 162,40 196,30" fill="none" stroke="rgba(39,41,55,.12)" stroke-width="5" stroke-linecap="round"/>
+    <path d="M 64,172 C 105,82 162,40 196,30" fill="none" stroke="#d64635" stroke-width="2" stroke-linecap="round" marker-end="url(#mka)"/>
+    <!-- pill: upper-left — when x<96, arrow y>109 (well below pill bottom 66) -->
+    <rect x="4" y="40" width="92" height="26" rx="13" fill="rgba(255,246,244,.96)" stroke="rgba(214,70,53,.28)" stroke-width="1.2"/>
+    <polyline points="13,58 17,53 21,56 27,47" fill="none" stroke="#d64635" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="57" y="58" text-anchor="middle" font-size="11.5" font-weight="700" fill="#d64635">提升 10 倍</text>
+    <!-- x-labels -->
+    <text x="38" y="200" text-anchor="middle" font-size="12" fill="rgba(39,41,55,.36)">手动搜索</text>
+    <text x="222" y="200" text-anchor="middle" font-size="12" font-weight="700" fill="#d64635">Offer 捕手</text>
+  </svg>
+</div>
+
+<!-- ── Chart 2: 准备时间（下降） ── -->
+<div class="chart">
+  <p class="ct">单次投递准备时间（分钟）</p>
+  <svg class="cg" viewBox="0 0 260 222" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="gb" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#d64635" stop-opacity=".82"/>
+        <stop offset="100%" stop-color="#d64635" stop-opacity=".20"/>
+      </linearGradient>
+      <marker id="mkb" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+        <path d="M1,1.5 L8,5 L1,8.5" fill="none" stroke="#d64635" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </marker>
+    </defs>
+    <line x1="8" y1="172" x2="252" y2="172" stroke="rgba(39,41,55,.06)" stroke-width="1.2"/>
+    <!-- left bar: tall -->
+    <rect x="12" y="26" width="52" height="146" rx="6" fill="rgba(39,41,55,.1)"/>
+    <!-- right bar: tiny -->
+    <rect x="196" y="163" width="52" height="9" rx="4" fill="url(#gb)"/>
+    <!-- value labels -->
+    <text x="38" y="20" text-anchor="middle" font-size="20" font-weight="800" fill="rgba(39,41,55,.30)" letter-spacing="-0.5">25</text>
+    <text x="222" y="157" text-anchor="middle" font-size="13" font-weight="600" fill="#d64635">2</text>
+    <!-- downward arc; pill at upper-right, arrow enters x>112 only below y=70 -->
+    <path d="M 64,30 C 64,148 196,124 196,165" fill="none" stroke="rgba(39,41,55,.12)" stroke-width="5" stroke-linecap="round"/>
+    <path d="M 64,30 C 64,148 196,124 196,165" fill="none" stroke="#d64635" stroke-width="2" stroke-linecap="round" marker-end="url(#mkb)"/>
+    <!-- pill: upper-right -->
+    <rect x="112" y="28" width="90" height="26" rx="13" fill="rgba(255,246,244,.96)" stroke="rgba(214,70,53,.28)" stroke-width="1.2"/>
+    <polyline points="121,36 125,41 129,37 135,46" fill="none" stroke="#d64635" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="166" y="46" text-anchor="middle" font-size="11.5" font-weight="700" fill="#d64635">节省 92%</text>
+    <!-- x-labels -->
+    <text x="38" y="200" text-anchor="middle" font-size="12" fill="rgba(39,41,55,.36)">手动准备</text>
+    <text x="222" y="200" text-anchor="middle" font-size="12" font-weight="700" fill="#d64635">Offer 捕手</text>
+  </svg>
+</div>
+
+<!-- ── Chart 3: JD契合度 ── -->
+<div class="chart">
+  <p class="ct">简历—JD 契合度</p>
+  <svg class="cg" viewBox="0 0 260 222" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="gc" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#d64635" stop-opacity=".82"/>
+        <stop offset="100%" stop-color="#d64635" stop-opacity=".20"/>
+      </linearGradient>
+      <marker id="mkc" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+        <path d="M1,1.5 L8,5 L1,8.5" fill="none" stroke="#d64635" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </marker>
+    </defs>
+    <line x1="8" y1="172" x2="252" y2="172" stroke="rgba(39,41,55,.06)" stroke-width="1.2"/>
+    <!-- left bar: medium 40% -->
+    <rect x="12" y="104" width="52" height="68" rx="6" fill="rgba(39,41,55,.1)"/>
+    <!-- right bar: tall 90% -->
+    <rect x="196" y="26" width="52" height="146" rx="6" fill="url(#gc)"/>
+    <!-- value labels -->
+    <text x="38" y="98" text-anchor="middle" font-size="13" font-weight="600" fill="rgba(39,41,55,.30)">40%</text>
+    <text x="222" y="20" text-anchor="middle" font-size="20" font-weight="800" fill="#d64635" letter-spacing="-0.5">90%</text>
+    <!-- diagonal arc from left bar top; pill at upper-left safely avoids -->
+    <path d="M 64,104 C 105,60 162,36 196,30" fill="none" stroke="rgba(39,41,55,.12)" stroke-width="5" stroke-linecap="round"/>
+    <path d="M 64,104 C 105,60 162,36 196,30" fill="none" stroke="#d64635" stroke-width="2" stroke-linecap="round" marker-end="url(#mkc)"/>
+    <!-- pill: upper-left — when x<96, arrow y>74 (below pill bottom 66) -->
+    <rect x="4" y="40" width="92" height="26" rx="13" fill="rgba(255,246,244,.96)" stroke="rgba(214,70,53,.28)" stroke-width="1.2"/>
+    <polyline points="13,58 17,53 21,56 27,47" fill="none" stroke="#d64635" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="57" y="58" text-anchor="middle" font-size="11.5" font-weight="700" fill="#d64635">提升 2.2 倍</text>
+    <!-- x-labels -->
+    <text x="38" y="200" text-anchor="middle" font-size="12" fill="rgba(39,41,55,.36)">凭感觉筛选</text>
+    <text x="222" y="200" text-anchor="middle" font-size="12" font-weight="700" fill="#d64635">Offer 捕手</text>
+  </svg>
+</div>
+
+</div>
 <script>
-function resizeCharts(){
-  var h=document.documentElement.scrollHeight;
-  window.parent.postMessage({type:'streamlit:setFrameHeight',height:h},'*');
-}
-window.addEventListener('load',resizeCharts);
-setTimeout(resizeCharts,300);
 (function(){
-  var bars=document.querySelectorAll('.bar');
-  var targets=Array.from(bars).map(function(b){return b.style.height;});
-  bars.forEach(function(b){b.style.height='0';b.style.transition='height .9s cubic-bezier(.22,1,.36,1)';});
-  var charts=document.querySelectorAll('.chart');
-  var obs=new IntersectionObserver(function(entries){
-    entries.forEach(function(e){
+  function resize(){window.parent.postMessage({type:'streamlit:setFrameHeight',height:document.documentElement.scrollHeight},'*');}
+  window.addEventListener('load',resize);setTimeout(resize,300);
+  var cards=document.querySelectorAll('.chart');
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e,i){
       if(e.isIntersecting){
-        bars.forEach(function(b,i){setTimeout(function(){b.style.height=targets[i];},i*80);});
-        obs.unobserve(e.target);
+        setTimeout(function(){e.target.classList.add('show');},i*120);
+        io.unobserve(e.target);
       }
     });
-  },{threshold:0.3});
-  var obs2=new IntersectionObserver(function(entries){
-    entries.forEach(function(e){
-      if(e.isIntersecting){e.target.style.opacity='1';e.target.style.transform='translateY(0)';obs2.unobserve(e.target);}
-    });
   },{threshold:0.1});
-  charts.forEach(function(c,i){
-    c.style.opacity='0';c.style.transform='translateY(20px)';
-    c.style.transition='opacity .6s ease '+(i*.12)+'s,transform .6s ease '+(i*.12)+'s';
-    obs2.observe(c);if(i===0)obs.observe(c);
-  });
+  cards.forEach(function(c){io.observe(c);});
 })();
 </script>
-</body></html>""", height=480)
+</body></html>""", height=530)
 
     st.markdown("""<div style="padding-top:56px"><span class="lp-section-label">用户评价</span></div>""",
                 unsafe_allow_html=True)
@@ -847,7 +1145,7 @@ setTimeout(resizeCharts,300);
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#efece8;font-family:"Noto Serif SC","Songti SC","STSong","SimSun",serif;}
-.quotes{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
+.quotes{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:28px;}
 .q{background:#fff;border:1px solid rgba(39,41,55,.08);border-radius:20px;padding:44px 36px 48px;}
 .qhd{display:flex;align-items:center;gap:18px;margin-bottom:28px;}
 .av{width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600;flex-shrink:0;}
@@ -909,7 +1207,7 @@ setTimeout(resizeQuotes,300);
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#efece8;font-family:"Noto Serif SC","Songti SC","STSong","SimSun",serif;}
-.wrap{background:rgba(39,41,55,.03);border:1px solid rgba(39,41,55,.08);border-radius:20px;overflow:visible;}
+.wrap{background:rgba(39,41,55,.03);border:1px solid rgba(39,41,55,.08);border-radius:20px;overflow:visible;margin-top:28px;}
 details{border-bottom:1px solid rgba(39,41,55,.07);}
 details:last-child{border-bottom:none;}
 summary{list-style:none;display:flex;align-items:center;justify-content:space-between;padding:22px 28px;cursor:pointer;font-size:15px;font-weight:600;color:#272937;line-height:1.4;gap:16px;}
@@ -972,7 +1270,7 @@ setTimeout(resize,200);
 
     st.markdown("""
 <footer class="lp-footer">
-  <span style="font-family:'DM Serif Display',serif;font-style:italic;color:rgba(39,41,55,.3);font-size:.82rem;">Offer捕手</span>
+  <span style="font-family:'DM Serif Display',serif;font-style:italic;font-size:.82rem;"><span style="color:rgba(214,70,53,.45);">Offer</span><span style="color:rgba(39,41,55,.3);">捕手</span></span>
   <span class="lp-footer-sep"></span>
   <span>© 2026</span>
 </footer>
@@ -1018,141 +1316,888 @@ setTimeout(resize,200);
     st.stop()   # 不渲染主 app
 
 
-# ── 侧边栏 ──────────────────────────────────────────────────────────────────────
-with st.sidebar:
-    # ── 品牌 Header ──
+
+# ── 过滤器变量（从 session_state 读取，由设置页写入）────────────────────────────
+min_score    = st.session_state.get("min_score", 60)
+platforms    = st.session_state.get("filter_platforms", [])
+tiers        = st.session_state.get("filter_tiers", [])
+cities_filter = st.session_state.get("filter_cities", [])
+sort_by      = st.session_state.get("sort_by_pref", "匹配分（高→低）")
+
+# ── 顶部导航栏 ─────────────────────────────────────────────────────────────────
+def _nav_link(label: str, page: str, icon_path: str = "") -> str:
+    active = "nav-active" if _page == page else ""
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{icon_path}</svg>' if icon_path else ""
+    return f'<a href="?page={page}" target="_self" class="app-nav-link {active}">{svg}{label}</a>'
+
+_icon_dash   = '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'
+_icon_jobs   = '<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><line x1="12" y1="12" x2="12" y2="12"/>'
+_icon_saved  = '<path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>'
+_icon_resume = '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'
+_icon_prog   = '<path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>'
+_icon_bell   = '<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>'
+_icon_help   = '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>'
+_icon_set    = '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>'
+
+def _svg(path: str, size: int = 16) -> str:
+    return f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{path}</svg>'
+
+_bell_svg = f'<svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{_icon_bell}</svg>'
+_help_svg = f'<svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{_icon_help}</svg>'
+_caret_svg = '<svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>'
+
+st.markdown(f"""<nav class="app-nav"><a href="?show_landing=1" target="_self" class="app-nav-brand"><span class="app-nav-brand-name"><span class="brand-offer">Offer</span><span class="brand-catch">捕手</span></span></a><div class="app-nav-links">{_nav_link("仪表盘","dashboard",_icon_dash)}{_nav_link("岗位匹配","jobs",_icon_jobs)}{_nav_link("已保存","jobs",_icon_saved)}{_nav_link("简历诊断","resume",_icon_resume)}{_nav_link("我的","progress",_icon_prog)}</div><div class="app-nav-right"><span class="app-nav-icon-btn" title="暂无通知">{_bell_svg}</span><a class="app-nav-icon-btn" href="?show_landing=1" target="_self" title="帮助">{_help_svg}</a><div class="app-nav-divider"></div><a href="?page=settings" target="_self" class="app-nav-icon-btn" title="设置">{_svg(_icon_set, 18)}</a></div></nav>""", unsafe_allow_html=True)
+
+# ════════════════════════════════════════════════════════════════════════════════
+# 设置页  (page=settings)
+# ════════════════════════════════════════════════════════════════════════════════
+if _page == "settings":
+    # ── settings page CSS ─────────────────────────────────────────────────────
     st.markdown("""
-<div style="display:flex;align-items:center;gap:10px;padding:4px 0 12px">
-  <span style="font-size:1.5rem;line-height:1">🎯</span>
-  <div>
-    <div style="font-size:1rem;font-weight:800;color:#d64635;letter-spacing:-.01em;line-height:1.2">Offer捕手</div>
-    <div style="font-size:.7rem;color:#9ca3af;line-height:1.3">AI 求职全链路助手</div>
+<style>
+/* Settings page global bg */
+section[data-testid="stMain"] > div:first-child { background: #f8f9fc !important; }
+.set-section-card {
+    background: #fff;
+    border: 1px solid rgba(39,41,55,.08);
+    border-radius: 16px;
+    padding: 24px 24px 20px;
+    margin-bottom: 18px;
+    box-shadow: 0 1px 4px rgba(39,41,55,.05);
+}
+.set-section-title {
+    display: flex; align-items: center; gap: 9px;
+    font-size: .9rem; font-weight: 700; color: #272937;
+    margin-bottom: 16px;
+}
+.set-section-icon {
+    width: 28px; height: 28px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+/* AI status card */
+.ai-status-connected {
+    display: flex; align-items: center; gap: 12px;
+    background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+    border: 1px solid #bbf7d0; border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 12px;
+}
+.ai-status-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 0 3px rgba(34,197,94,.2);
+    flex-shrink: 0;
+}
+.ai-status-disconnected {
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    border: 1px solid #fde68a; border-radius: 12px;
+    padding: 16px 18px; margin-bottom: 12px;
+}
+.ai-step-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 8px 0; border-bottom: 1px solid rgba(251,191,36,.25);
+}
+.ai-step-row:last-child { border-bottom: none; }
+.ai-step-num {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #f59e0b; color: #fff;
+    font-size: .68rem; font-weight: 800;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.ai-step-text { font-size: .78rem; color: #92400e; line-height: 1.45; }
+.ai-step-link { color: #d97706; font-weight: 600; text-decoration: none; }
+.ai-step-link:hover { text-decoration: underline; }
+/* Resume card status */
+.resume-loaded-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #eff6ff; border: 1px solid #bfdbfe;
+    border-radius: 8px; padding: 8px 12px;
+    font-size: .8rem; color: #1d4ed8; font-weight: 600; margin-bottom: 10px;
+}
+/* Category pills for job prefs */
+.cat-tag {
+    display: inline-block; padding: 4px 10px;
+    border-radius: 20px; font-size: .75rem; font-weight: 600;
+    border: 1.5px solid #e2e8f0; color: #475569;
+    background: #f8fafc; margin: 2px 3px 2px 0; cursor: default;
+}
+</style>
+""", unsafe_allow_html=True)
+
+    st.markdown('<div style="font-size:1.35rem;font-weight:800;color:#272937;margin-bottom:20px">⚙️ 设置</div>', unsafe_allow_html=True)
+
+    _c1, _c2 = st.columns(2, gap="large")
+
+    # ── LEFT COLUMN ────────────────────────────────────────────────────────────
+    with _c1:
+        # ── 简历卡片 ────────────────────────────────────────────────────────────
+        st.markdown("""
+<div class="set-section-card">
+  <div class="set-section-title">
+    <div class="set-section-icon" style="background:#eff6ff">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+        <polyline points="10 9 9 9 8 9"/>
+      </svg>
+    </div>
+    我的简历
   </div>
 </div>
 """, unsafe_allow_html=True)
-    if st.button("← 返回首页", use_container_width=True):
-        st.session_state.show_landing = True
-        st.rerun()
-    st.divider()
-
-    # API Key 输入框（始终显示，已配置时 placeholder 提示即可）
-    _key_set = bool(st.session_state.api_key)
-    api_key_input = st.text_input(
-        "OpenRouter API Key",
-        value="",
-        type="password",
-        placeholder="已配置，输入新 Key 可覆盖" if _key_set else "sk-or-v1-...",
-        help="在 openrouter.ai 免费注册获取，支持 DeepSeek / Claude / GPT 等模型",
-    )
-    if api_key_input:
-        set_api_key(api_key_input)
-        st.rerun()
-    st.caption("✅ 已配置" if _key_set else "⚠️ 未配置，将展示示例匹配分数")
-
-    st.divider()
-
-    # 简历
-    st.subheader("📄 我的简历")
-    if st.session_state.resume_text:
-        # ── 已加载状态 ──
-        st.success(f"✅ 已加载简历（{len(st.session_state.resume_text)} 字）")
-        with st.expander("👁️ 查看简历全文"):
-            st.text_area(
-                "简历内容",
-                value=st.session_state.resume_text,
-                height=300,
-                label_visibility="collapsed",
-                key="resume_preview",
-            )
-        if st.button("🔄 换一份简历", use_container_width=True):
-            st.session_state.resume_text = ""
-            st.rerun()
-    else:
-        # ── 未加载状态 ──
-        resume_file = st.file_uploader("上传简历（.docx）", type=["docx"])
-        if resume_file:
-            with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
-                tmp.write(resume_file.read())
-                tmp_path = tmp.name
-            st.session_state.resume_text = parse_docx(tmp_path)
-            st.rerun()
-        if st.button("💡 使用示例简历体验", use_container_width=True,
-                     help="直接加载内置示例简历，无需上传"):
-            st.session_state.resume_text = SAMPLE_RESUME
-            st.rerun()
-
-    st.divider()
-
-    # 求职意向
-    st.subheader("🎯 求职意向")
-    preferences_input = st.text_input(
-        "方向偏好", value=st.session_state.preferences,
-        placeholder="如：数据运营、产品运营、商业分析",
-    )
-    st.session_state.preferences = preferences_input
-
-    # 高级筛选（折叠，减少侧边栏视觉噪音）
-    with st.expander("🔍 高级筛选"):
-        min_score = st.slider("最低匹配分", 0, 100, 60)
-        platforms = st.multiselect(
-            "招聘平台（空 = 不限）", ["boss", "shixiseng"],
-            default=[],
-            format_func=lambda x: PLATFORM_NAME.get(x, x),
-            placeholder="不限平台",
-        )
-        tiers = st.multiselect(
-            "公司规模（空 = 不限）", ["大厂", "中厂", "小厂"],
-            default=[],
-            placeholder="不限规模",
-        )
-        _all_cities = sorted(set(
-            j.get("location", "").split("-")[0].strip()
-            for j in load_jobs()
-            if j.get("location", "").strip()
-        ))
-        cities_filter = st.multiselect(
-            "城市（空 = 不限）", _all_cities,
-            default=[],
-            placeholder="不限城市",
-        )
-        sort_by = st.selectbox(
-            "排序方式",
-            ["匹配分（高→低）", "公司规模（大厂优先）", "城市"],
-        )
-    st.divider()
-    if st.button("🤖 AI 重新匹配", type="primary", use_container_width=True):
-        if not st.session_state.resume_text:
-            st.error("请先上传简历或点击「使用示例简历体验」")
-        elif not st.session_state.api_key:
-            st.error("请先填入 API Key")
+        if st.session_state.resume_text:
+            st.markdown(f"""
+<div class="resume-loaded-badge">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+  </svg>
+  简历已加载 · {len(st.session_state.resume_text)} 字
+</div>
+""", unsafe_allow_html=True)
+            with st.expander("查看简历全文"):
+                st.text_area("内容", value=st.session_state.resume_text, height=240,
+                             label_visibility="collapsed", key="set_resume_preview")
+            if st.button("🔄 更换简历", use_container_width=True):
+                st.session_state.resume_text = ""
+                st.rerun()
         else:
-            jobs_raw = load_jobs()
-            with st.spinner(f"AI 正在分析 {len(jobs_raw)} 条岗位，约需 1-2 分钟…"):
-                matched = asyncio.run(match_jobs(
-                    st.session_state.resume_text,
-                    [j.copy() for j in jobs_raw],
-                    st.session_state.preferences,
-                ))
-            st.session_state.matched_jobs = matched
-            st.session_state.diagnosis_result = None
-            st.session_state.interview_result = None
-            st.session_state.greetings = {}
-            st.rerun()
+            _rf = st.file_uploader("上传简历（.docx / .pdf）", type=["docx", "pdf"], key="set_resume_upload")
+            if _rf:
+                _suf = ".pdf" if _rf.name.lower().endswith(".pdf") else ".docx"
+                with tempfile.NamedTemporaryFile(suffix=_suf, delete=False) as _tmp:
+                    _tmp.write(_rf.read()); _tmp_path = _tmp.name
+                st.session_state.resume_text = parse_resume(_tmp_path)
+                st.rerun()
+            if st.button("🎬 示例简历（一键演示）", use_container_width=True,
+                         help="加载示例简历并预置匹配结果，无需等待 AI 运算"):
+                st.session_state.resume_text    = SAMPLE_RESUME
+                st.session_state.preferences    = "数据运营、数据分析、用户运营"
+                st.session_state.pref_categories = ["运营", "数据"]
+                st.session_state.pref_subs       = ["数据运营", "数据分析", "用户运营"]
+                if SAMPLE_MATCHED_JOBS:
+                    st.session_state.matched_jobs = SAMPLE_MATCHED_JOBS
+                st.rerun()
 
+        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
+        # ── 求职意向卡片 ─────────────────────────────────────────────────────────
+        st.markdown("""
+<div class="set-section-card">
+  <div class="set-section-title">
+    <div class="set-section-icon" style="background:#fdf4ff">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+      </svg>
+    </div>
+    求职意向
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
-# ── 主内容区 ────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs([
-    "📊 岗位匹配看板",
-    "📋 简历诊断与优化",
-    "📈 投递进度追踪",
-])
+        # Primary categories multiselect
+        _cat_opts = list(JOB_CATEGORIES.keys())
+        _sel_cats = st.multiselect(
+            "感兴趣的方向（可多选）",
+            options=_cat_opts,
+            default=st.session_state.pref_categories,
+            placeholder="选择大类，如：产品、运营…",
+            key="set_pref_cats",
+        )
+        st.session_state.pref_categories = _sel_cats
 
+        # Sub-category multiselect (dynamic)
+        if _sel_cats:
+            _all_subs = []
+            for _cat in _sel_cats:
+                _all_subs.extend(JOB_CATEGORIES.get(_cat, []))
+            # filter previously saved subs that are still valid
+            _valid_prev_subs = [s for s in st.session_state.pref_subs if s in _all_subs]
+            _sel_subs = st.multiselect(
+                "细分方向（可多选）",
+                options=_all_subs,
+                default=_valid_prev_subs,
+                placeholder="选择具体岗位方向…",
+                key="set_pref_subs",
+            )
+            st.session_state.pref_subs = _sel_subs
+            # Build preferences string
+            _pref_str = "、".join(_sel_subs) if _sel_subs else "、".join(_sel_cats)
+            st.session_state.preferences = _pref_str
+            if _pref_str:
+                st.markdown(f"""
+<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+     padding:10px 14px;margin-top:6px;font-size:.78rem;color:#475569">
+  <span style="font-weight:600;color:#272937">当前偏好：</span>{_pref_str}
+</div>
+""", unsafe_allow_html=True)
+        else:
+            st.session_state.pref_subs = []
+            st.session_state.preferences = ""
+            st.markdown("""
+<div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;
+     padding:10px 14px;margin-top:6px;font-size:.78rem;color:#94a3b8;text-align:center">
+  请先选择感兴趣的大方向
+</div>
+""", unsafe_allow_html=True)
 
-# ────────────────────────────────────────────────────────────────────────────────
-# Tab 1：岗位匹配看板
-# ────────────────────────────────────────────────────────────────────────────────
-with tab1:
+    # ── RIGHT COLUMN ───────────────────────────────────────────────────────────
+    with _c2:
+        # ── 岗位筛选卡片 ─────────────────────────────────────────────────────────
+        st.markdown("""
+<div class="set-section-card">
+  <div class="set-section-title">
+    <div class="set-section-icon" style="background:#fff7ed">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+      </svg>
+    </div>
+    岗位筛选
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+        _ms = st.slider("最低匹配分", 0, 100, st.session_state.min_score, key="set_min_score")
+        st.session_state.min_score = _ms
+        _pl = st.multiselect("招聘平台", ["boss", "shixiseng"], default=st.session_state.filter_platforms,
+            format_func=lambda x: PLATFORM_NAME.get(x, x), placeholder="不限", key="set_platforms")
+        st.session_state.filter_platforms = _pl
+        _ti = st.multiselect("公司规模", ["大厂", "中厂", "小厂"], default=st.session_state.filter_tiers, placeholder="不限", key="set_tiers")
+        st.session_state.filter_tiers = _ti
+        _sb = st.selectbox("排序方式", ["匹配分（高→低）", "公司规模（大厂优先）", "城市"],
+            index=["匹配分（高→低）", "公司规模（大厂优先）", "城市"].index(st.session_state.sort_by_pref), key="set_sort")
+        st.session_state.sort_by_pref = _sb
+
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+        if st.button("🤖 AI 重新匹配", type="primary", use_container_width=True):
+            if not st.session_state.resume_text:
+                st.error("请先上传简历")
+            elif not st.session_state.api_key:
+                st.error("请先配置 AI 连接")
+            else:
+                _jraw = load_jobs()
+                with st.spinner(f"AI 正在分析 {len(_jraw)} 条岗位…"):
+                    _matched = asyncio.run(match_jobs(st.session_state.resume_text, [j.copy() for j in _jraw], st.session_state.preferences))
+                st.session_state.matched_jobs = _matched
+                st.session_state.diagnosis_result = None
+                st.session_state.interview_result = None
+                st.session_state.greetings = {}
+                st.rerun()
+
+    st.stop()
+
+if _page == "dashboard":
+    # ── 欢迎 Hero + 引导卡 ───────────────────────────────────────────────────────────
+    # 步骤串联依赖：前一步未完成，后续步骤不计为完成
+    _step1_done = bool(st.session_state.resume_text)
+    _step2_done = bool(st.session_state.preferences) and _step1_done
+    _step3_done = bool(st.session_state.matched_jobs) and _step1_done
+    _applied_count = sum(
+        1 for j in get_tracking_jobs()
+        if j.get("status") not in ("pending", "rejected")
+    )
+    _step4_done = _applied_count > 0 and _step3_done
+    _steps_done  = sum([_step1_done, _step2_done, _step3_done, _step4_done])
+
+    def _step_html(num: int, label: str, sub: str, done: bool, active: bool,
+                   link: str = "", done_link: str = "") -> str:
+        """
+        Always returns a single <div> — never wraps in <a> so CSS grid never breaks.
+        - active+undone → "前往完成 →" CTA
+        - done + done_link → "更换 →" secondary link (e.g. go to settings to replace)
+        """
+        if done:
+            icon_bg  = "#d64635"; icon_color = "#fff"
+            icon_svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" '
+                        'viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">'
+                        '<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>')
+            border = "1.5px solid rgba(214,70,53,.3)"
+            bg     = "rgba(214,70,53,.04)"
+        elif active:
+            icon_bg  = "#272937"; icon_color = "#fff"
+            icon_svg = f'<span style="font-size:.73rem;font-weight:800;line-height:1">{num}</span>'
+            border   = "2px solid #272937"
+            bg       = "rgba(39,41,55,.03)"
+        else:
+            icon_bg  = "rgba(39,41,55,.07)"; icon_color = "rgba(39,41,55,.25)"
+            icon_svg = f'<span style="font-size:.73rem;font-weight:700;color:rgba(39,41,55,.25);line-height:1">{num}</span>'
+            border   = "1.5px solid rgba(39,41,55,.08)"
+            bg       = "transparent"
+
+        label_color = "#272937" if (done or active) else "rgba(39,41,55,.3)"
+        sub_color   = "rgba(39,41,55,.48)" if (done or active) else "rgba(39,41,55,.22)"
+
+        done_row = ""
+        if done:
+            change_link = (f'<a href="{done_link}" target="_self" style="font-size:.7rem;color:rgba(39,41,55,.38);'
+                           f'text-decoration:none;margin-left:6px;transition:color .15s" '
+                           f'onmouseover="this.style.color=\'#272937\'" '
+                           f'onmouseout="this.style.color=\'rgba(39,41,55,.38)\'">更换 →</a>'
+                           ) if done_link else ""
+            done_row = (f'<div style="display:flex;align-items:center;margin-top:5px">'
+                        f'<span style="font-size:.7rem;font-weight:700;color:#d64635;'
+                        f'background:rgba(214,70,53,.1);padding:1px 7px;border-radius:99px">✓ 已完成</span>'
+                        f'{change_link}</div>')
+
+        cta = (
+            f'<a href="{link}" target="_self" style="display:inline-flex;align-items:center;gap:2px;margin-top:7px;'
+            f'font-size:.71rem;font-weight:700;color:#d64635;text-decoration:none;'
+            f'padding:3px 9px;border-radius:99px;background:rgba(214,70,53,.09);'
+            f'border:1px solid rgba(214,70,53,.18)">'
+            f'前往完成 →</a>'
+        ) if (link and active and not done) else ""
+
+        return f"""<div style="display:flex;align-items:flex-start;gap:12px;padding:14px 16px;
+border-radius:12px;border:{border};background:{bg};transition:border-color .2s">
+  <div style="width:30px;height:30px;border-radius:50%;background:{icon_bg};color:{icon_color};
+       display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">
+    {icon_svg}
+  </div>
+  <div style="min-width:0;flex:1">
+    <div style="font-size:.86rem;font-weight:700;color:{label_color};line-height:1.35;margin-bottom:2px">
+      {label}
+    </div>
+    <div style="font-size:.74rem;color:{sub_color};line-height:1.5">{sub}</div>
+    {done_row}{cta}
+  </div>
+</div>"""
+
+    _pct = int(_steps_done / 4 * 100)
+
+    _greeting = "欢迎！先上传简历，开启求职之旅"
+    if   _steps_done == 4: _greeting = "一切就绪，全力冲刺 Offer！"
+    elif _steps_done == 3: _greeting = "最后一步，开始投递吧！"
+    elif _steps_done == 2: _greeting = "已完成 2 步，点击「AI 重新匹配」"
+    elif _steps_done == 1: _greeting = "继续完成设置，解锁全部功能"
+
+    _matched_cnt = len(st.session_state.matched_jobs) if st.session_state.matched_jobs else 0
+    _applied_disp = str(_applied_count) if _applied_count else "—"
+    _matched_disp = str(_matched_cnt) if _matched_cnt else "—"
+
+    st.markdown(f"""
+    <style>
+    .ob-hero {{
+      background: linear-gradient(130deg, #272937 0%, #1e2030 55%, #1a1c2a 100%);
+      border-radius: 18px; padding: 28px 36px; margin-bottom: 24px;
+      display: flex; align-items: center; justify-content: space-between; gap: 24px;
+      position: relative; overflow: hidden;
+    }}
+    .ob-hero::after {{
+      content: ''; position: absolute; right: -60px; top: -60px;
+      width: 280px; height: 280px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(255,255,255,.06) 0%, transparent 65%);
+      pointer-events: none;
+    }}
+    .ob-hero-left {{ flex: 1; min-width: 0; position: relative; z-index: 1; }}
+    .ob-hero-stats {{
+      display: flex; gap: 24px; margin-top: 14px;
+    }}
+    .ob-stat-val {{ font-size: 1.45rem; font-weight: 800; color: #fff; line-height: 1; letter-spacing: -.02em; }}
+    .ob-stat-lbl {{ font-size: .66rem; color: rgba(255,255,255,.55); margin-top: 3px; }}
+    .ob-stat-divider {{ width: 1px; background: rgba(255,255,255,.15); align-self: stretch; margin: 2px 0; }}
+    .ob-deco {{
+      flex-shrink: 0; width: 180px; height: 120px;
+      position: relative; z-index: 1; opacity: .85;
+    }}
+    </style>
+
+    <div class="ob-hero">
+      <div class="ob-hero-left">
+        <div style="font-size:1.35rem;font-weight:700;color:#efece8;line-height:1.3;margin:0 0 6px;letter-spacing:-.01em">{_greeting}</div>
+        <div class="ob-hero-stats">
+          <div>
+            <div class="ob-stat-val">{_steps_done}<span style="font-size:.85rem;font-weight:500;color:rgba(255,255,255,.45)">/4</span></div>
+            <div class="ob-stat-lbl">步骤完成</div>
+          </div>
+          <div class="ob-stat-divider"></div>
+          <div>
+            <div class="ob-stat-val">{_applied_disp}</div>
+            <div class="ob-stat-lbl">已投递</div>
+          </div>
+          <div class="ob-stat-divider"></div>
+          <div>
+            <div class="ob-stat-val">{_matched_disp}</div>
+            <div class="ob-stat-lbl">匹配岗位</div>
+          </div>
+        </div>
+      </div>
+      <div class="ob-deco">
+        <svg width="180" height="120" viewBox="0 0 180 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Back card -->
+          <rect x="32" y="18" width="128" height="84" rx="12" fill="rgba(255,255,255,.07)" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
+          <!-- Main card -->
+          <rect x="18" y="10" width="128" height="84" rx="12" fill="rgba(255,255,255,.12)" stroke="rgba(255,255,255,.18)" stroke-width="1"/>
+          <!-- Logo chip -->
+          <rect x="30" y="22" width="22" height="22" rx="6" fill="rgba(255,255,255,.18)"/>
+          <text x="41" y="37" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="10" font-weight="800" fill="white">字</text>
+          <!-- Title bar -->
+          <rect x="58" y="24" width="70" height="7" rx="3.5" fill="rgba(255,255,255,.22)"/>
+          <!-- Sub bar -->
+          <rect x="58" y="36" width="46" height="5" rx="2.5" fill="rgba(255,255,255,.1)"/>
+          <!-- Score chip -->
+          <rect x="126" y="20" width="14" height="18" rx="5" fill="rgba(255,255,255,.2)"/>
+          <text x="133" y="32" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="7" font-weight="800" fill="white">92</text>
+          <!-- Divider -->
+          <line x1="30" y1="54" x2="138" y2="54" stroke="rgba(255,255,255,.08)" stroke-width="1"/>
+          <!-- Progress bar bg -->
+          <rect x="30" y="62" width="108" height="5" rx="2.5" fill="rgba(255,255,255,.08)"/>
+          <!-- Progress bar fill -->
+          <rect x="30" y="62" width="99" height="5" rx="2.5" fill="rgba(255,255,255,.4)"/>
+          <!-- Tag chips -->
+          <rect x="30" y="74" width="36" height="13" rx="6.5" fill="rgba(255,255,255,.12)"/>
+          <rect x="72" y="74" width="30" height="13" rx="6.5" fill="rgba(255,255,255,.1)"/>
+          <rect x="108" y="74" width="26" height="13" rx="6.5" fill="rgba(255,255,255,.08)"/>
+          <!-- Floating mini card -->
+          <rect x="118" y="84" width="56" height="38" rx="9" fill="rgba(255,255,255,.1)" stroke="rgba(255,255,255,.14)" stroke-width="1"/>
+          <circle cx="130" cy="97" r="6" fill="rgba(255,255,255,.15)"/>
+          <text x="130" y="101" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="7" font-weight="700" fill="white">网</text>
+          <rect x="141" y="93" width="28" height="5" rx="2.5" fill="rgba(255,255,255,.18)"/>
+          <rect x="141" y="102" width="20" height="4" rx="2" fill="rgba(255,255,255,.1)"/>
+          <!-- Sparkle -->
+          <path d="M163 6 L164 9.5 L167.5 10.5 L164 11.5 L163 15 L162 11.5 L158.5 10.5 L162 9.5 Z" fill="rgba(255,255,255,.5)"/>
+          <!-- Dots -->
+          <circle cx="10" cy="108" r="2.5" fill="rgba(255,255,255,.15)"/>
+          <circle cx="4" cy="96" r="1.5" fill="rgba(255,255,255,.1)"/>
+        </svg>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if _steps_done < 4:
+        _s1 = _step_html(1,"上传简历","支持 .docx / .pdf，AI 自动解析内容",
+                         _step1_done, not _step1_done,
+                         link="?page=progress", done_link="?page=progress")
+        _s2 = _step_html(2,"设置求职意向","在「设置」页选择感兴趣的岗位方向",
+                         _step2_done, _step1_done and not _step2_done,
+                         link="?page=settings", done_link="?page=settings")
+        _s3 = _step_html(3,"AI 智能匹配","在「设置」页点击「AI 重新匹配」，或加载示例简历体验",
+                         _step3_done, _step2_done and not _step3_done,
+                         link="?page=settings")
+        _s4 = _step_html(4,"开始投递","在「岗位匹配」页选择岗位并投递",
+                         _step4_done, _step3_done and not _step4_done,
+                         link="?page=jobs")
+        st.markdown(f"""
+<div style="background:#fff;border:1px solid rgba(39,41,55,.07);border-radius:18px;
+     padding:22px 24px 22px;margin-bottom:16px;
+     box-shadow:0 1px 6px rgba(39,41,55,.05)">
+  <!-- Header row -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:30px;height:30px;border-radius:9px;background:#272937;
+           display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#efece8" stroke-width="2.2">
+          <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+        </svg>
+      </div>
+      <div>
+        <div style="font-size:.9rem;font-weight:700;color:#272937;line-height:1.2">4 步快速开始</div>
+        <div style="font-size:.7rem;color:rgba(39,41,55,.38);margin-top:1px">完成设置，解锁 AI 全链路求职功能</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:.74rem;font-weight:700;color:#d64635;
+           background:rgba(214,70,53,.09);padding:3px 11px;border-radius:99px;white-space:nowrap">
+        {_steps_done} / 4 完成</span>
+    </div>
+  </div>
+  <!-- Progress bar -->
+  <div style="height:4px;background:rgba(39,41,55,.07);border-radius:99px;overflow:hidden;margin:14px 0 16px">
+    <div style="height:100%;width:{_pct}%;background:linear-gradient(90deg,#d64635,#e8614f);border-radius:99px;
+         transition:width .5s cubic-bezier(.4,0,.2,1)"></div>
+  </div>
+  <!-- Steps grid -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    {_s1}
+    {_s2}
+    {_s3}
+    {_s4}
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── 简历操作区 ───────────────────────────────────────────────────────────────────
+    if _step1_done:
+        # 已有简历：显示简历预览条 + 清除按钮
+        _resume_preview = st.session_state.resume_text[:80].replace("\n", " ").strip() + "…"
+        _is_sample = st.session_state.resume_text == SAMPLE_RESUME
+        _resume_label = "示例简历" if _is_sample else f"已加载简历（{len(st.session_state.resume_text)} 字）"
+        _rc1, _rc2 = st.columns([5, 1])
+        with _rc1:
+            st.markdown(f"""
+<div style="background:#fff;border:1px solid rgba(39,41,55,.07);border-radius:12px;
+     padding:12px 16px;display:flex;align-items:center;gap:10px;margin-bottom:4px">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.2" style="flex-shrink:0">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+    <polyline points="14 2 14 8 20 8"/>
+    <polyline points="9 12 11 14 15 10"/>
+  </svg>
+  <span style="font-size:.82rem;font-weight:600;color:#272937">{_resume_label}</span>
+  {"<span style='font-size:.72rem;color:rgba(39,41,55,.38);margin-left:4px'>· 可在设置页替换为真实简历</span>" if _is_sample else ""}
+</div>""", unsafe_allow_html=True)
+        with _rc2:
+            if st.button("清除简历", use_container_width=True, key="dash_clear_resume"):
+                st.session_state.resume_text = ""
+                st.session_state.matched_jobs = None   # 清除匹配结果
+                st.session_state.diagnosis_result = None
+                st.session_state.greetings = {}
+                st.rerun()
+    # ── 进展面板 ─────────────────────────────────────────────────────────────────────
+    _track_jobs   = get_tracking_jobs()
+    _cnt_matched  = len(st.session_state.matched_jobs) if st.session_state.matched_jobs else 0
+    _cnt_applied  = sum(1 for j in _track_jobs if j.get("status") not in ("pending", "rejected"))
+    _cnt_inter    = sum(1 for j in _track_jobs if j.get("status") in ("interview", "chatting", "final_interview", "waiting"))
+    _cnt_offer    = sum(1 for j in _track_jobs if j.get("status") == "offer")
+
+    st.markdown(f"""
+    <style>
+    .prog-section {{ margin:8px 0 28px; }}
+    .prog-section-title {{ font-size:1.05rem; font-weight:700; color:#272937; margin-bottom:14px; }}
+    .prog-cards {{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }}
+    .prog-card {{
+      background:#fff; border:1px solid rgba(39,41,55,.07); border-radius:16px;
+      padding:22px 20px 18px; cursor:default;
+    }}
+    .prog-card-val {{ font-size:2rem; font-weight:900; color:#272937; line-height:1; margin-bottom:6px; letter-spacing:-.03em; }}
+    .prog-card-lbl {{ font-size:.74rem; font-weight:500; color:rgba(39,41,55,.42); letter-spacing:.02em; }}
+    .prog-card-dot {{ width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }}
+    </style>
+    <div class="prog-section">
+      <div class="prog-section-title">我的进展</div>
+      <div class="prog-cards">
+        <div class="prog-card">
+          <div class="prog-card-val">{_cnt_matched}</div>
+          <div class="prog-card-lbl"><span class="prog-card-dot" style="background:#6366f1"></span>匹配岗位</div>
+        </div>
+        <div class="prog-card">
+          <div class="prog-card-val">{_cnt_applied}</div>
+          <div class="prog-card-lbl"><span class="prog-card-dot" style="background:#3b82f6"></span>已投递</div>
+        </div>
+        <div class="prog-card">
+          <div class="prog-card-val">{_cnt_inter}</div>
+          <div class="prog-card-lbl"><span class="prog-card-dot" style="background:#10b981"></span>面试中</div>
+        </div>
+        <div class="prog-card">
+          <div class="prog-card-val">{_cnt_offer}</div>
+          <div class="prog-card-lbl"><span class="prog-card-dot" style="background:#d64635"></span>Offer</div>
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── 推荐岗位轮播（Correlate AI 风格） ─────────────────────────────────────────────
+    _rec_jobs = (st.session_state.matched_jobs or load_jobs())[:12]
+
+    def _company_initial(name: str) -> str:
+        for ch in name:
+            if '一' <= ch <= '鿿':
+                return ch
+        return name[0].upper() if name else "?"
+
+    # 公司名 → 官网域名，用于获取真实 logo（Google favicon 服务）
+    _COMPANY_DOMAIN: dict[str, str] = {
+        "字节跳动": "bytedance.com", "TikTok": "tiktok.com",
+        "百度": "baidu.com", "阿里巴巴": "alibaba.com", "阿里": "alibaba.com",
+        "腾讯": "tencent.com", "京东": "jd.com", "美团": "meituan.com",
+        "哔哩哔哩": "bilibili.com", "网易": "netease.com", "快手": "kuaishou.com",
+        "小米": "mi.com", "小红书": "xiaohongshu.com", "得物App": "dewu.com",
+        "得物": "dewu.com", "知乎": "zhihu.com", "滴滴": "didiglobal.com",
+        "滴滴出行": "didiglobal.com", "微博": "weibo.com", "爱奇艺": "iqiyi.com",
+        "搜狐": "sohu.com", "大疆": "dji.com", "好未来": "100tal.com",
+        "作业帮": "zybang.com", "科大讯飞": "iflytek.com",
+        "同花顺": "10jqka.com.cn", "携程": "ctrip.com", "贝壳找房": "ke.com",
+        "哈啰": "hellobike.com", "虎牙直播": "huya.com",
+        "德勤": "deloitte.com", "明基BenQ": "benq.com", "明基": "benq.com",
+        "NIO蔚来": "nio.com", "蔚来": "nio.com", "唯品会": "vip.com",
+        "360集团": "360.cn", "蓝湖": "lanhuapp.com",
+        "CHARLES&KEITH GROUP": "charleskeith.com",
+        "博彦科技": "beyondsoft.com", "亚信科技": "asiainfo.com",
+        "同道猎聘": "liepin.com", "猎聘": "liepin.com",
+    }
+
+    def _company_logo_url(name: str) -> str:
+        domain = _COMPANY_DOMAIN.get(name, "")
+        if domain:
+            return f"https://www.google.com/s2/favicons?domain={domain}&sz=64"
+        return ""
+
+    _palette = ["#d64635","#3b82f6","#10b981","#8b5cf6","#f59e0b","#06b6d4","#ec4899","#6366f1"]
+    _CPP = 3  # cards per page visible
+    _num_pages = max(1, -(-len(_rec_jobs) // _CPP))  # ceil division
+
+    # 生成所有卡片（扁平列表，scroll-snap）
+    _all_cards_html = ""
+    for _ri, _rj in enumerate(_rec_jobs):
+        _col   = _palette[_ri % len(_palette)]
+        _cname = _rj.get("company", "?")
+        _init  = _company_initial(_cname)
+        _logo_url = _company_logo_url(_cname)
+        _co   = _esc(_cname)
+        _ti   = _esc(_rj.get("title", ""))
+        _loc  = _esc(_rj.get("location", "").split("-")[0])
+        _sc   = _rj.get("match_score", 0)
+        _tier = get_company_tier(_cname)
+        # logo: img with fallback to letter
+        if _logo_url:
+            _logo_html = (
+                f'<div class="rc-logo" style="background:{_col}20;color:{_col};overflow:hidden;padding:0">'
+                f'<img src="{_logo_url}" width="42" height="42" style="object-fit:contain;border-radius:10px"'
+                f' onerror="this.parentElement.innerHTML=\'<span style=&quot;font-size:1.1rem;font-weight:800&quot;>{_init}</span>\'">'
+                f'</div>'
+            )
+        else:
+            _logo_html = f'<div class="rc-logo" style="background:{_col}20;color:{_col}">{_init}</div>'
+        _all_cards_html += f"""
+    <div class="rc">
+      <div class="rc-top">
+        {_logo_html}
+        <a href="#" class="rc-detail" onclick="navTo('jobs');return false;">查看详情 →</a>
+      </div>
+      <div class="rc-company">{_co}</div>
+      <div class="rc-title">{_ti}</div>
+      <div class="rc-loc">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="flex-shrink:0">
+          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+        </svg>{_loc}
+      </div>
+      <div class="rc-bottom">
+        <span class="rc-score" style="color:{_col};background:{_col}18">{_sc:.0f}分</span>
+        <span class="rc-tier">{_tier}</span>
+      </div>
+    </div>"""
+
+    _dots_html = "".join(
+        f'<button class="dot {"active" if i == 0 else ""}" onclick="goTo({i})"></button>'
+        for i in range(_num_pages)
+    )
+
+    st.components.v1.html(f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <style>
+    *{{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}}
+    body{{background:transparent;}}
+    .rec-hdr{{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}}
+    .rec-hdr-title{{font-size:1.05rem;font-weight:700;color:#272937;}}
+    .rec-hdr-more{{font-size:.82rem;font-weight:600;color:#d64635;text-decoration:none;}}
+    .rec-hdr-more:hover{{text-decoration:underline;}}
+    .rec-track{{
+      display:flex; gap:14px;
+      overflow-x:scroll; scroll-snap-type:x mandatory; scroll-behavior:smooth;
+      -webkit-overflow-scrolling:touch; scrollbar-width:none; cursor:grab;
+    }}
+    .rec-track::-webkit-scrollbar{{display:none;}}
+    .rec-track.dragging{{cursor:grabbing; scroll-behavior:auto;}}
+    .rc{{
+      flex:0 0 calc(33.333% - 10px); scroll-snap-align:start;
+      background:#fff; border:1px solid rgba(39,41,55,.08); border-radius:16px;
+      padding:20px 18px 16px; display:flex; flex-direction:column;
+      transition:box-shadow .18s,transform .18s;
+    }}
+    .rc:hover{{box-shadow:0 6px 24px rgba(39,41,55,.1); transform:translateY(-2px);}}
+    .rc-top{{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;}}
+    .rc-logo{{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;font-weight:800;flex-shrink:0;}}
+    .rc-detail{{font-size:.74rem;font-weight:600;color:#d64635;text-decoration:none;white-space:nowrap;padding-top:4px;}}
+    .rc-detail:hover{{text-decoration:underline;}}
+    .rc-company{{font-size:.74rem;color:rgba(39,41,55,.42);margin-bottom:3px;}}
+    .rc-title{{font-size:.88rem;font-weight:700;color:#272937;line-height:1.35;margin-bottom:8px;}}
+    .rc-loc{{display:flex;align-items:center;gap:4px;font-size:.72rem;color:rgba(39,41,55,.38);flex:1;}}
+    .rc-bottom{{display:flex;align-items:center;justify-content:space-between;margin-top:14px;padding-top:12px;border-top:1px solid rgba(39,41,55,.05);}}
+    .rc-score{{font-size:.72rem;font-weight:800;padding:3px 10px;border-radius:99px;}}
+    .rc-tier{{font-size:.68rem;color:rgba(39,41,55,.28);font-weight:500;}}
+    .rec-dots{{display:flex;justify-content:center;gap:8px;margin-top:16px;}}
+    .dot{{width:8px;height:8px;border-radius:50%;background:rgba(39,41,55,.15);cursor:pointer;transition:background .2s,transform .2s;border:none;padding:0;}}
+    .dot.active{{background:#d64635;transform:scale(1.25);}}
+    </style>
+    </head><body>
+    <div class="rec-hdr">
+      <span class="rec-hdr-title">今日推荐岗位</span>
+      <a href="#" class="rec-hdr-more" onclick="navTo('jobs');return false;">全部岗位 →</a>
+    </div>
+    <div class="rec-track" id="track">{_all_cards_html}</div>
+    <div class="rec-dots" id="dots">{_dots_html}</div>
+    <script>
+    // 利用 allow-same-origin：在父页面创建 <a> 并 click()，绕过 iframe sandbox 的导航限制
+    function navTo(page) {{
+      try {{
+        var a = window.parent.document.createElement('a');
+        a.href = '?page=' + page;
+        window.parent.document.body.appendChild(a);
+        a.click();
+        setTimeout(function() {{ try {{ window.parent.document.body.removeChild(a); }} catch(e) {{}} }}, 200);
+      }} catch(e) {{
+        // 兜底：直接赋值（部分环境可用）
+        try {{ window.parent.location.href = '?page=' + page; }} catch(e2) {{}}
+      }}
+    }}
+    var track = document.getElementById('track');
+    var dots  = document.querySelectorAll('.dot');
+    var cpp   = 3;
+    var realNumPages = {_num_pages};
+
+    // ── Clone 第一页卡片追加到末尾，实现向前循环翻页 ──────────────────
+    var origCards = Array.from(track.querySelectorAll('.rc'));
+    for (var ci = 0; ci < cpp && ci < origCards.length; ci++) {{
+      var cl = origCards[ci].cloneNode(true);
+      // 克隆节点上的 onclick 需要重新绑定（cloneNode 不复制事件）
+      var clLinks = cl.querySelectorAll('a.rc-detail');
+      clLinks.forEach(function(a) {{
+        a.onclick = function() {{ navTo('jobs'); return false; }};
+      }});
+      track.appendChild(cl);
+    }}
+
+    // ── 圆点同步 ──────────────────────────────────────────────────────
+    function updateDots(page) {{
+      var p = Math.max(0, Math.min(page, realNumPages - 1));
+      dots.forEach(function(d, i) {{ d.classList.toggle('active', i === p); }});
+    }}
+
+    // ── goTo：直接跳到第 n 页（n 可以是 realNumPages，即 clone 页）───
+    function goTo(n) {{
+      track.scrollLeft = n * track.offsetWidth;
+    }}
+
+    // ── 滚动监听：同步圆点 + 到达 clone 页后瞬间跳回第 0 页 ──────────
+    var settleTimer = null;
+    track.addEventListener('scroll', function() {{
+      var raw = track.scrollLeft / (track.offsetWidth || 1);
+      updateDots(Math.round(raw));
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(function() {{
+        // 滚动停稳后，若在 clone 页（第 realNumPages 页），瞬间跳回第 0 页
+        if (raw >= realNumPages - 0.05) {{
+          track.style.scrollBehavior = 'auto';
+          track.scrollLeft = 0;
+          updateDots(0);
+          requestAnimationFrame(function() {{
+            requestAnimationFrame(function() {{ track.style.scrollBehavior = ''; }});
+          }});
+        }}
+      }}, 160);
+    }}, {{passive: true}});
+
+    // ── 鼠标拖拽（不干扰 click）──────────────────────────────────────
+    var dragOrigin = null;
+    track.addEventListener('mousedown', function(e) {{
+      if (e.button !== 0) return;
+      dragOrigin = {{ x: e.clientX, scroll: track.scrollLeft }};
+      track.classList.add('dragging');
+    }});
+    document.addEventListener('mousemove', function(e) {{
+      if (!dragOrigin) return;
+      track.scrollLeft = dragOrigin.scroll - (e.clientX - dragOrigin.x);
+    }});
+    document.addEventListener('mouseup', function(e) {{
+      if (!dragOrigin) return;
+      var dx = Math.abs(e.clientX - dragOrigin.x);
+      dragOrigin = null;
+      track.classList.remove('dragging');
+      if (dx > 5) {{
+        var blocker = function(ev) {{
+          ev.preventDefault(); ev.stopPropagation();
+          document.removeEventListener('click', blocker, true);
+        }};
+        document.addEventListener('click', blocker, true);
+      }}
+    }});
+
+    // ── 自动播放：始终向前一页，越过末页进入 clone 页后自动回绕 ──────
+    var autoTimer = null;
+    function startAuto() {{
+      autoTimer = setInterval(function() {{
+        var cur = Math.round(track.scrollLeft / (track.offsetWidth || 1));
+        goTo(cur + 1);   // 包括进入 clone 页（scroll 监听会在停稳后跳回 0）
+      }}, 3500);
+    }}
+    function stopAuto() {{ clearInterval(autoTimer); autoTimer = null; }}
+    startAuto();
+    track.addEventListener('mouseenter', stopAuto);
+    track.addEventListener('mouseleave', startAuto);
+    track.addEventListener('touchstart', stopAuto, {{passive: true}});
+    track.addEventListener('touchend', function() {{ setTimeout(startAuto, 2000); }}, {{passive: true}});
+    </script>
+    </body></html>""", height=310)
+
+    # dashboard 页到此结束，后续内容属于其他页面
+    st.stop()
+
+# ════════════════════════════════════════════════════════════════════════════════
+# 岗位匹配页  (page=jobs) — Correlate AI 风格重设计
+# ════════════════════════════════════════════════════════════════════════════════
+if _page == "jobs":
+    # ── 页面级样式 ────────────────────────────────────────────────────────────
+    st.markdown("""<style>
+    /* Jobs page: light blue-gray background */
+    .stApp { background: #f0f4f8 !important; }
+
+    /* ── Toolbar ── */
+    .jobs-bar {
+      display:flex; align-items:center; justify-content:space-between;
+      gap:12px; margin-bottom:20px; flex-wrap:wrap;
+    }
+    .jobs-bar-left  { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .jobs-bar-right { display:flex; align-items:center; gap:10px; }
+    .pref-pill {
+      display:inline-flex; align-items:center; gap:6px;
+      padding:7px 14px; border:1.5px solid #cbd5e1; border-radius:99px;
+      font-size:.82rem; font-weight:600; color:#334155;
+      text-decoration:none!important; background:#fff;
+      transition:border-color .15s,color .15s; white-space:nowrap;
+    }
+    .pref-pill:hover { border-color:#2563eb; color:#2563eb; }
+    .filter-chip {
+      display:inline-flex; align-items:center;
+      padding:5px 11px; background:rgba(37,99,235,.08);
+      border:1px solid rgba(37,99,235,.2); border-radius:99px;
+      font-size:.74rem; font-weight:600; color:#2563eb; white-space:nowrap;
+    }
+    .jobs-count { font-size:.82rem; color:#94a3b8; white-space:nowrap; }
+
+    /* ── Stat cards ── */
+    .jobs-stats {
+      display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px;
+    }
+    .jobs-stat-card {
+      background:#fff; border:1px solid #e2e8f0; border-radius:12px;
+      padding:14px 18px; display:flex; align-items:center; gap:12px;
+    }
+    .jobs-stat-icon {
+      width:38px; height:38px; border-radius:10px;
+      display:flex; align-items:center; justify-content:center; flex-shrink:0;
+    }
+    .jobs-stat-val { font-size:1.55rem; font-weight:800; color:#0f172a; line-height:1; }
+    .jobs-stat-lbl { font-size:.7rem; color:#94a3b8; margin-top:3px; letter-spacing:.02em; }
+
+    /* ── Job cards v2 ── */
+    .jcv2 {
+      background:#fff; border:1px solid #e2e8f0; border-radius:14px;
+      padding:18px 20px 14px; margin-bottom:8px;
+      transition:box-shadow .18s, border-color .18s;
+      box-shadow:0 1px 3px rgba(0,0,0,.04);
+    }
+    .jcv2:hover { box-shadow:0 4px 18px rgba(0,0,0,.09); border-color:#cbd5e1; }
+    .jcv2-top { display:flex; align-items:flex-start; gap:14px; }
+    .jcv2-logo {
+      width:44px; height:44px; border-radius:10px;
+      display:flex; align-items:center; justify-content:center;
+      font-size:1.1rem; font-weight:800; color:#fff; flex-shrink:0;
+      font-family:-apple-system,"PingFang SC",sans-serif;
+    }
+    .jcv2-body { flex:1; min-width:0; }
+    .jcv2-title-row { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+    .jcv2-title { font-size:.95rem; font-weight:700; color:#0f172a; line-height:1.35; }
+    .jcv2-score-hi  { font-size:1.2rem; font-weight:800; color:#2563eb; letter-spacing:-.02em; flex-shrink:0; }
+    .jcv2-score-mid { font-size:1.2rem; font-weight:800; color:#f59e0b; letter-spacing:-.02em; flex-shrink:0; }
+    .jcv2-score-lo  { font-size:1.2rem; font-weight:800; color:#94a3b8; letter-spacing:-.02em; flex-shrink:0; }
+    .jcv2-meta { font-size:.78rem; color:#64748b; margin-top:4px; }
+    .jcv2-tags { display:flex; flex-wrap:wrap; gap:5px; margin-top:10px; }
+    .tag-hi   { font-size:.7rem; padding:3px 9px; border-radius:99px; border:1.2px solid #c7d2fe; color:#4f46e5; background:#fff; white-space:nowrap; }
+    .tag-lo   { font-size:.7rem; padding:3px 9px; border-radius:99px; border:1.2px solid #fecaca; color:#ef4444; background:#fff; white-space:nowrap; }
+    .tag-tier { font-size:.68rem; padding:3px 9px; border-radius:99px; border:1.2px solid #e2e8f0; color:#64748b; background:#fff; white-space:nowrap; }
+    .tag-plat { font-size:.68rem; padding:3px 9px; border-radius:99px; border:1.2px solid #e2e8f0; color:#64748b; background:#fff; white-space:nowrap; }
+
+    /* Override Streamlit divider color on this page */
+    hr { border-color: #e2e8f0 !important; }
+    </style>""", unsafe_allow_html=True)
+
     all_jobs = st.session_state.matched_jobs or load_jobs()
 
     _TIER_ORDER = {"大厂": 0, "中厂": 1, "小厂": 2}
@@ -1170,30 +2215,108 @@ with tab1:
             _TIER_ORDER.get(get_company_tier(x.get("company", "")), 3),
             -x.get("match_score", 0),
         ))
-    else:  # 城市
+    else:
         filtered = sorted(_pool, key=lambda x: (
             x.get("location", "").split("-")[0],
             -x.get("match_score", 0),
         ))
 
-    # ── 概览指标 ──
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("📋 匹配岗位", len(filtered))
-    c2.metric("🌟 高匹配 ≥80分", sum(1 for j in filtered if j.get("match_score", 0) >= 80))
-    c3.metric("🏆 大厂机会", sum(1 for j in filtered if get_company_tier(j.get("company", "")) == "大厂"))
-    _vis_cities = {j.get("location", "").split("-")[0] for j in filtered if j.get("location")}
-    c4.metric("📍 覆盖城市", len(_vis_cities))
+    # ── Toolbar ─────────────────────────────────────────────────────────────
+    _bar_left, _bar_right = st.columns([5, 1])
+    with _bar_left:
+        _fchips = ""
+        if min_score > 0:
+            _fchips += f'<span class="filter-chip">≥ {min_score} 分</span>'
+        if platforms:
+            _fchips += f'<span class="filter-chip">{"·".join(PLATFORM_NAME.get(p,p) for p in platforms)}</span>'
+        if tiers:
+            _fchips += f'<span class="filter-chip">{" / ".join(tiers)}</span>'
+        st.markdown(f"""<div class="jobs-bar">
+  <div class="jobs-bar-left">
+    <a href="?page=settings" target="_self" class="pref-pill">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/>
+        <line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
+      偏好设置
+    </a>
+    {_fchips}
+  </div>
+  <div class="jobs-bar-right">
+    <span class="jobs-count">共 {len(filtered)} 条岗位</span>
+  </div>
+</div>""", unsafe_allow_html=True)
+    with _bar_right:
+        if st.button("⚡ AI 重新匹配", type="primary", use_container_width=True):
+            if not st.session_state.resume_text:
+                st.error("请先在「设置」上传简历")
+            elif not st.session_state.api_key:
+                st.error("请先在「设置」填入 API Key")
+            else:
+                _jraw2 = load_jobs()
+                with st.spinner(f"分析 {len(_jraw2)} 条岗位…"):
+                    _m2 = asyncio.run(match_jobs(
+                        st.session_state.resume_text,
+                        [j.copy() for j in _jraw2],
+                        st.session_state.preferences,
+                    ))
+                st.session_state.matched_jobs = _m2
+                st.session_state.diagnosis_result = None
+                st.session_state.greetings = {}
+                st.rerun()
 
-    # ── 策略洞察（默认折叠，不遮挡岗位列表）──
-    with st.expander("🧠 求职策略洞察", expanded=False):
+    # ── Stat cards ──────────────────────────────────────────────────────────
+    _cnt_high  = sum(1 for j in filtered if j.get("match_score", 0) >= 80)
+    _cnt_big   = sum(1 for j in filtered if get_company_tier(j.get("company","")) == "大厂")
+    _vis_cities = {j.get("location","").split("-")[0] for j in filtered if j.get("location")}
+
+    st.markdown(f"""<div class="jobs-stats">
+  <div class="jobs-stat-card">
+    <div class="jobs-stat-icon" style="background:rgba(37,99,235,.09)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/>
+      </svg>
+    </div>
+    <div><div class="jobs-stat-val">{len(filtered)}</div><div class="jobs-stat-lbl">匹配岗位</div></div>
+  </div>
+  <div class="jobs-stat-card">
+    <div class="jobs-stat-icon" style="background:rgba(99,102,241,.09)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+      </svg>
+    </div>
+    <div><div class="jobs-stat-val">{_cnt_high}</div><div class="jobs-stat-lbl">高匹配 ≥80分</div></div>
+  </div>
+  <div class="jobs-stat-card">
+    <div class="jobs-stat-icon" style="background:rgba(245,158,11,.09)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 9H4.5a2.5 2.5 0 010-5H6"/><path d="M18 9h1.5a2.5 2.5 0 000-5H18"/>
+        <path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>
+        <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>
+        <path d="M18 2H6v7a6 6 0 0012 0V2z"/>
+      </svg>
+    </div>
+    <div><div class="jobs-stat-val">{_cnt_big}</div><div class="jobs-stat-lbl">大厂机会</div></div>
+  </div>
+  <div class="jobs-stat-card">
+    <div class="jobs-stat-icon" style="background:rgba(16,185,129,.09)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
+      </svg>
+    </div>
+    <div><div class="jobs-stat-val">{len(_vis_cities)}</div><div class="jobs-stat-lbl">覆盖城市</div></div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    # ── 策略洞察（折叠）────────────────────────────────────────────────────
+    with st.expander("💡 求职策略洞察", expanded=False):
         ins_col1, ins_col2, ins_col3 = st.columns(3)
-
         with ins_col1:
             st.write("**🎯 优先投递 Top 5**")
             for i, job in enumerate(filtered[:5], 1):
-                score = job.get("match_score", 0)
-                st.write(f"{i}. **{job.get('company', '')}** · {job.get('title', '')} — {score_color(score)} {score:.0f}分")
-
+                sc = job.get("match_score", 0)
+                st.write(f"{i}. **{job.get('company', '')}** · {job.get('title', '')} — {score_color(sc)} {sc:.0f}分")
         with ins_col2:
             st.write("**📚 岗位高频需求技能**")
             skill_freq = analyze_skill_gaps(filtered or all_jobs)
@@ -1201,25 +2324,29 @@ with tab1:
             for skill, cnt in skill_freq:
                 st.write(f"`{skill}`")
                 st.progress(cnt / max_cnt)
-
         with ins_col3:
             st.write("**💡 投递策略建议**")
             high = sum(1 for j in filtered if j.get("match_score", 0) >= 80)
-            mid = sum(1 for j in filtered if 65 <= j.get("match_score", 0) < 80)
-            low = sum(1 for j in filtered if j.get("match_score", 0) < 65)
+            mid  = sum(1 for j in filtered if 65 <= j.get("match_score", 0) < 80)
+            low  = sum(1 for j in filtered if j.get("match_score", 0) < 65)
             st.write(f"• 高匹配（≥80分）**{high}** 条 → 优先冲刺")
             st.write(f"• 中匹配（65-79分）**{mid}** 条 → 优化简历后投递")
             st.write(f"• 低匹配（<65分）**{low}** 条 → 保底备选")
-            tier_dist = Counter(get_company_tier(j.get("company", "")) for j in filtered[:20])
-            st.write(f"• Top 20 中：大厂 **{tier_dist.get('大厂',0)}** 个 / 中厂 **{tier_dist.get('中厂',0)}** 个 / 小厂 **{tier_dist.get('小厂',0)}** 个")
+            tier_dist = Counter(get_company_tier(j.get("company","")) for j in filtered[:20])
+            st.write(f"• Top 20 中：大厂 **{tier_dist.get('大厂',0)}** / 中厂 **{tier_dist.get('中厂',0)}** / 小厂 **{tier_dist.get('小厂',0)}**")
 
-    st.divider()
-
-    # ── 空状态 ──
+    # ── 空状态 ──────────────────────────────────────────────────────────────
     if not filtered:
-        st.info("📭 未找到符合条件的岗位，请调整左侧的「最低匹配分」、「招聘平台」或「公司规模」筛选条件。")
+        st.markdown("""<div style="text-align:center;padding:48px 0;color:#94a3b8">
+  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"
+       style="margin-bottom:12px" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+  </svg>
+  <div style="font-size:.9rem;font-weight:600;color:#64748b;margin-bottom:4px">未找到符合条件的岗位</div>
+  <div style="font-size:.8rem">请前往「偏好设置」调整最低匹配分、平台或规模筛选</div>
+</div>""", unsafe_allow_html=True)
 
-    # ── 分页逻辑 ──
+    # ── 分页逻辑 ──────────────────────────────────────────────────────────
     PAGE_SIZE = 20
     _sig = hashlib.md5(
         json.dumps([min_score, sorted(platforms), sorted(tiers), sorted(cities_filter), sort_by],
@@ -1233,17 +2360,17 @@ with tab1:
     cur_page    = st.session_state.t1_page
     page_jobs   = filtered[cur_page * PAGE_SIZE : (cur_page + 1) * PAGE_SIZE]
 
-    # ── 预加载已追踪的 job_id 集合（用于按钮状态）──
+    # ── 预加载追踪集合 ─────────────────────────────────────────────────────
     _tracked_ids = {str(j["job_id"]) for j in get_tracking_jobs()}
 
-    # ── 岗位卡片（对标参考设计：直接展示，无 expander）──
+    # ── 岗位列表 ──────────────────────────────────────────────────────────
     for job in page_jobs:
         job_uid = str(job.get("job_id") or job.get("id", ""))
 
-        # HTML 卡片
-        st.markdown(_job_card(job, compact=False), unsafe_allow_html=True)
+        # Correlate AI 风格卡片
+        st.markdown(_job_card_v2(job), unsafe_allow_html=True)
 
-        # 操作按钮行（紧贴卡片底部）
+        # 操作按钮行
         existing_greeting = st.session_state.greetings.get(job_uid)
         btn_c1, btn_c2, btn_c3, btn_c4 = st.columns([2, 2, 2, 2])
 
@@ -1264,14 +2391,17 @@ with tab1:
 
         with btn_c2:
             if job.get("url"):
-                st.link_button("🔗 查看岗位", job["url"], use_container_width=True)
+                st.link_button("🔗 查看原帖", job["url"], use_container_width=True)
 
         with btn_c3:
             desc = job.get("description") or ""
             req  = job.get("requirements") or ""
             if desc or req:
-                if st.button("📄 岗位详情", key=f"det_{job_uid}", use_container_width=True):
-                    st.session_state[f"expand_d_{job_uid}"] = not st.session_state.get(f"expand_d_{job_uid}", False)
+                _det_open = st.session_state.get(f"expand_d_{job_uid}", False)
+                _det_label = "✕ 关闭详情" if _det_open else "📄 岗位详情"
+                if st.button(_det_label, key=f"det_{job_uid}", use_container_width=True):
+                    st.session_state[f"expand_d_{job_uid}"] = not _det_open
+                    st.rerun()
 
         with btn_c4:
             if job_uid in _tracked_ids:
@@ -1282,23 +2412,17 @@ with tab1:
                     st.toast(f"已将「{job.get('title', '')}」加入投递追踪 📋")
                     st.rerun()
 
-        # 可展开：打招呼文案（st.code 自带复制按钮）
+        # 打招呼文案展开
         if existing_greeting and st.session_state.get(f"expand_g_{job_uid}"):
             st.code(existing_greeting, language=None)
 
-        # 可展开：岗位详情
+        # Correlate AI 风格两栏详情面板
         if st.session_state.get(f"expand_d_{job_uid}"):
-            desc = job.get("description") or ""
-            req  = job.get("requirements") or ""
-            with st.container(border=True):
-                if desc:
-                    st.markdown(f"**岗位描述**\n\n{desc[:400]}{'…' if len(desc) > 400 else ''}")
-                if req:
-                    st.markdown(f"**岗位要求**\n\n{req[:300]}{'…' if len(req) > 300 else ''}")
+            st.markdown(_job_detail_panel(job), unsafe_allow_html=True)
 
-    # ── 分页控制栏 ──
+    # ── 分页控制 ──────────────────────────────────────────────────────────
     if total_pages > 1:
-        st.divider()
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         pg_c1, pg_c2, pg_c3 = st.columns([1, 3, 1])
         with pg_c1:
             if st.button("← 上一页", disabled=(cur_page == 0), use_container_width=True):
@@ -1306,8 +2430,8 @@ with tab1:
                 st.rerun()
         with pg_c2:
             st.markdown(
-                f"<div style='text-align:center;color:#6b7280;font-size:.87em;padding-top:6px'>"
-                f"第 {cur_page+1} / {total_pages} 页 · 共 {len(filtered)} 条岗位</div>",
+                f"<div style='text-align:center;color:#94a3b8;font-size:.84rem;padding-top:7px'>"
+                f"第 {cur_page+1} / {total_pages} 页 · 共 {len(filtered)} 条</div>",
                 unsafe_allow_html=True,
             )
         with pg_c3:
@@ -1317,9 +2441,10 @@ with tab1:
 
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Tab 2：简历诊断与优化
+# 简历诊断页  (page=resume)
 # ────────────────────────────────────────────────────────────────────────────────
-with tab2:
+if _page != "resume": pass
+else:
     st.subheader("📋 简历诊断 · 改写建议 · 面试备考")
 
     diag_jobs = st.session_state.matched_jobs or load_jobs()
@@ -1339,7 +2464,7 @@ with tab2:
     ready = bool(st.session_state.resume_text and st.session_state.api_key)
 
     if not st.session_state.resume_text:
-        st.info("👈 请先在左侧点击「💡 使用示例简历体验」，或上传你的 .docx 简历，再点击下方按钮开始分析。")
+        st.info("👈 请先在左侧点击「💡 使用示例简历体验」，或上传你的 .docx / .pdf 简历，再点击下方按钮开始分析。")
     elif not st.session_state.api_key:
         st.info("👈 请先在左侧填入 OpenRouter API Key，即可解锁 AI 诊断功能。")
 
@@ -1621,145 +2746,312 @@ def _dialog_add_from_pool():
         st.caption(f"仅展示前 60 条，使用搜索框缩小范围（共 {len(untracked)} 条）。")
 
 
-with tab3:
-    track_jobs = get_tracking_jobs()  # 每次从 DB 读取，确保即时更新
-    counts = {s: sum(1 for j in track_jobs if j.get("status") == s) for s in STATUS_ORDER}
+if _page != "progress": pass
+else:
+    _has_resume  = bool(st.session_state.resume_text)
+    _is_sample   = st.session_state.resume_text == SAMPLE_RESUME if _has_resume else False
+    _resume_words = len(st.session_state.resume_text) if _has_resume else 0
 
-    st.subheader("📈 投递进度追踪")
-
-    # ── 添加岗位操作区 ──
-    add_c1, add_c2, _ = st.columns([2, 2, 6])
-    with add_c1:
-        if st.button("✏️ 手动添加岗位", use_container_width=True):
-            _dialog_add_manual()
-    with add_c2:
-        if st.button("🎯 从匹配看板选取", use_container_width=True):
-            _dialog_add_from_pool()
-
-    # ── 关键指标 ──
-    _applied_cnt  = sum(counts.get(s, 0) for s in ["applied", "viewed", "chatting", "interview", "final_interview", "waiting", "offer"])
-    _interview_cnt = sum(counts.get(s, 0) for s in ["interview", "final_interview", "waiting", "offer"])
-    _offer_cnt    = counts.get("offer", 0)
-    _iv_rate      = f"{_interview_cnt/_applied_cnt*100:.0f}%" if _applied_cnt else "—"
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("📤 已投递", _applied_cnt)
-    k2.metric("💬 面试中", sum(counts.get(s, 0) for s in ["interview", "final_interview"]))
-    k3.metric("⏳ 等待结果", counts.get("waiting", 0))
-    k4.metric("🎉 Offer", _offer_cnt)
-    k5.metric("📈 面试率", _iv_rate)
-
-    # ── 漏斗进度条 ──
-    _funnel = [
-        ("📤 已投递",   sum(counts.get(s, 0) for s in ["applied", "viewed", "chatting", "interview", "final_interview", "waiting", "offer"])),
-        ("💬 进入面试",  sum(counts.get(s, 0) for s in ["interview", "final_interview", "waiting", "offer"])),
-        ("⏳ 等待结果",  sum(counts.get(s, 0) for s in ["waiting", "offer"])),
-        ("🎉 获得 Offer", counts.get("offer", 0)),
+    _STEPS = [
+        ("上传简历",  "上传你的简历，AI 自动解析"),
+        ("基本信息",  "完善联系方式等"),
+        ("教育经历",  "填写学校、专业、学历"),
+        ("工作经历",  "添加实习、工作经历"),
+        ("求职意向",  "设置目标岗位和城市"),
+        ("技能标签",  "填写你的核心技能"),
+        ("附加信息",  "作品集、个人网站等"),
     ]
-    _base = _funnel[0][1] or 1
-    for _fl, _fv in _funnel:
-        st.columns([3, 1])[0].progress(_fv / _base, text=f"{_fl}  {_fv} 条")
 
-    st.divider()
+    if "profile_step" not in st.session_state:
+        st.session_state.profile_step = 0
 
-    # ── 看板搜索 ──
-    kb_search = st.text_input(
-        "搜索看板",
-        placeholder="🔍 按公司名或岗位名过滤…",
-        label_visibility="collapsed",
-        key="kb_search",
+    _done = [
+        _has_resume and not _is_sample,
+        bool(st.session_state.get("prof_phone") or st.session_state.get("prof_location")),
+        bool(st.session_state.get("prof_edu")),
+        bool(st.session_state.get("prof_exp")),
+        bool(st.session_state.get("preferences")),
+        bool(st.session_state.get("prof_skills")),
+        bool(st.session_state.get("prof_links")),
+    ]
+
+    _ps_param = st.query_params.get("ps", "")
+    if _ps_param.isdigit() and 0 <= int(_ps_param) < len(_STEPS):
+        st.session_state.profile_step = int(_ps_param)
+        st.query_params.pop("ps", None)
+        st.rerun()
+
+    _step = st.session_state.profile_step
+    _step_name, _step_sub = _STEPS[_step]
+
+    # ── CSS ──────────────────────────────────────────────────────────────────
+    # :has() lets us style columns by looking at what's inside them,
+    # avoiding fragile positional selectors. Supported in all modern browsers.
+    st.markdown("""<style>
+/* Outer card: the stHorizontalBlock that contains our wizard */
+div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner) {
+    background: #fff;
+    border-radius: 16px;
+    border: 1px solid rgba(39,41,55,.08);
+    box-shadow: 0 1px 8px rgba(39,41,55,.06);
+    overflow: hidden;
+    gap: 0 !important;
+    align-items: stretch !important;
+    margin-top: 8px;
+}
+/* Sidebar column */
+div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
+  > div[data-testid="column"]:first-child,
+div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
+  > div[data-testid="stColumn"]:first-child {
+    border-right: 1px solid rgba(39,41,55,.07);
+    padding: 0 !important;
+    background: #fff;
+}
+/* Panel column */
+div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
+  > div[data-testid="column"]:last-child,
+div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
+  > div[data-testid="stColumn"]:last-child {
+    padding: 32px 36px !important;
+    background: #fff;
+}
+/* Remove extra gap/padding Streamlit adds to inner stVerticalBlock */
+div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
+  > div > div > [data-testid="stVerticalBlock"] {
+    gap: 0 !important;
+}
+/* Sidebar content */
+.pw-sidebar-inner { padding: 24px 0; }
+.pw-stitle { font-size:.95rem; font-weight:800; color:#272937; padding:0 22px 2px; }
+.pw-ssub   { font-size:.7rem; color:rgba(39,41,55,.38); padding:0 22px 16px; }
+.pw-sitem {
+    display:flex; align-items:center; gap:10px; padding:11px 22px;
+    border-left:3px solid transparent;
+    text-decoration:none !important;
+    color:inherit !important;
+    transition:background .12s;
+}
+.pw-sitem:hover { background:rgba(39,41,55,.04); text-decoration:none !important; }
+.pw-sitem.active { background:rgba(39,41,55,.055); border-left-color:#d64635; }
+.pw-sitem-dot {
+    width:8px; height:8px; border-radius:50%; flex-shrink:0;
+    background:rgba(39,41,55,.15);
+}
+.pw-sitem.active .pw-sitem-dot { background:#d64635; }
+.pw-sitem.sdone  .pw-sitem-dot { background:#272937; }
+.pw-sitem-name { font-size:.82rem; font-weight:600; color:rgba(39,41,55,.38); line-height:1.25; }
+.pw-sitem-desc { font-size:.67rem; color:rgba(39,41,55,.28); }
+.pw-sitem.active .pw-sitem-name { color:#272937; }
+.pw-sitem.sdone  .pw-sitem-name { color:rgba(39,41,55,.5); }
+.pw-check { margin-left:auto; color:#272937; opacity:.4; flex-shrink:0; }
+/* Panel styles */
+.pw-panel-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:5px; }
+.pw-panel-title { font-size:1.1rem; font-weight:800; color:#272937; }
+.pw-panel-sub { font-size:.82rem; color:rgba(39,41,55,.4); margin-bottom:20px; margin-top:0; }
+.pw-badge { font-size:.67rem; font-weight:700; padding:3px 10px; border-radius:99px; letter-spacing:.04em; }
+.pw-badge-prog { background:rgba(39,41,55,.07); color:rgba(39,41,55,.45); }
+.pw-badge-done { background:rgba(39,41,55,.11); color:#272937; }
+.pw-note {
+    background:rgba(214,70,53,.05); border:1px solid rgba(214,70,53,.14);
+    border-radius:10px; padding:10px 14px; font-size:.79rem;
+    color:#272937; margin-bottom:16px; line-height:1.6;
+}
+.pw-note b { color:#d64635; }
+.pw-flbl { font-size:.68rem; font-weight:700; color:rgba(39,41,55,.38);
+    text-transform:uppercase; letter-spacing:.07em; margin-bottom:4px; margin-top:14px; }
+.pw-divider { border:none; border-top:1px solid rgba(39,41,55,.07); margin:14px 0; }
+/* Nested stHorizontalBlock (inner st.columns) – no card style */
+div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
+  div[data-testid="stHorizontalBlock"] {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+    margin-top: 0 !important;
+}
+div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
+  div[data-testid="stHorizontalBlock"] > div {
+    padding: 0 !important;
+}
+</style>""", unsafe_allow_html=True)
+
+    # ── Build sidebar HTML ────────────────────────────────────────────────────
+    _chk = '<svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'
+
+    def _sitem(i):
+        name, desc = _STEPS[i]
+        cls = "pw-sitem"
+        if i == _step: cls += " active"
+        elif _done[i]: cls += " sdone"
+        chk = _chk if _done[i] else ""
+        return (
+            f'<a class="{cls}" href="?page=progress&ps={i}" target="_self">'
+            f'<span class="pw-sitem-dot"></span>'
+            f'<span><div class="pw-sitem-name">{name}</div>'
+            f'<div class="pw-sitem-desc">{desc}</div></span>'
+            f'<span class="pw-check">{chk}</span></a>'
+        )
+
+    _sidebar_html = (
+        '<div class="pw-sidebar-inner">'
+        '<div class="pw-stitle">完善简历</div>'
+        '<div class="pw-ssub">帮助 AI 更好地匹配岗位</div>'
+        + "".join(_sitem(i) for i in range(len(_STEPS)))
+        + '</div>'
     )
 
-    # ── 看板：逐行渲染，保证跨列对齐 ──────────────────────────────────────────
-    # 1. 先按列整理好卡片列表（应用搜索过滤）
-    _kb_kw = kb_search.strip().lower()
-    _stage_job_lists = [
-        [
-            j for j in track_jobs
-            if j.get("status") in stage_statuses
-            and (
-                not _kb_kw
-                or _kb_kw in (j.get("title") or "").lower()
-                or _kb_kw in (j.get("company") or "").lower()
-            )
-        ]
-        for (_, _, stage_statuses, _) in _KANBAN_STAGES
-    ]
+    _badge_cls = "pw-badge-done" if _done[_step] else "pw-badge-prog"
+    _badge_txt = "已完成" if _done[_step] else "进行中"
 
-    # 2. 表头行（一次性渲染）
-    hdr_cols = st.columns(len(_KANBAN_STAGES))
-    for col_obj, (icon, stage_lbl, stage_statuses, col_color), stage_jobs in zip(
-        hdr_cols, _KANBAN_STAGES, _stage_job_lists
-    ):
-        with col_obj:
+    # ── Two-column layout: sidebar | panel ───────────────────────────────────
+    _col_s, _col_p = st.columns([1.1, 2.5], gap="small")
+
+    with _col_s:
+        st.markdown(_sidebar_html, unsafe_allow_html=True)
+
+    with _col_p:
+        # Panel header
+        st.markdown(
+            f'<div class="pw-panel-hdr">'
+            f'<div class="pw-panel-title">{_step_name}</div>'
+            f'<span class="pw-badge {_badge_cls}">{_badge_txt}</span></div>'
+            f'<p class="pw-panel-sub">{_step_sub}</p>',
+            unsafe_allow_html=True,
+        )
+
+        # ── Step content ──────────────────────────────────────────────────────
+        if _step == 0:
+            if _has_resume and not _is_sample:
+                st.success(f"已上传简历（{_resume_words} 字）", icon="✅")
             st.markdown(
-                f'<div class="kb-hd">'
-                f'<span class="kb-dot" style="background:{col_color}"></span>'
-                f'<span>{stage_lbl}</span>'
-                f'<span class="kb-cnt">{len(stage_jobs)}</span>'
-                f'</div>'
-                f'<div class="kb-rule" style="background:{col_color}"></div>',
+                '<div class="pw-note"><b>说明：</b>支持 .docx / .pdf 格式，AI 自动解析内容用于岗位匹配。'
+                '也可以直接在下方粘贴文本。</div>',
                 unsafe_allow_html=True,
             )
+            _uploaded = st.file_uploader(
+                "上传简历文件", type=["pdf", "docx"], label_visibility="collapsed"
+            )
+            if _uploaded:
+                with st.spinner("解析中…"):
+                    try:
+                        _txt = parse_resume(_uploaded)
+                        st.session_state.resume_text = _txt
+                        st.success("解析成功！")
+                        st.rerun()
+                    except Exception as _e:
+                        st.error(f"解析失败：{_e}")
+            st.markdown('<div class="pw-divider"></div><div class="pw-flbl">或直接粘贴简历文本</div>', unsafe_allow_html=True)
+            _rt = st.text_area(
+                "", value=st.session_state.resume_text or "",
+                height=200, placeholder="将简历内容粘贴到这里…",
+                label_visibility="collapsed", key="resume_ta_prof",
+            )
+            if _rt != st.session_state.resume_text:
+                st.session_state.resume_text = _rt
 
-    # 3. 卡片区：逐行渲染 — 每行新建一组 5 列，确保同行高度对齐
-    max_rows = max((len(jl) for jl in _stage_job_lists), default=0)
-    for row_idx in range(max_rows):
-        row_cols = st.columns(len(_KANBAN_STAGES))
-        for col_obj, (icon, stage_lbl, stage_statuses, col_color), stage_jobs in zip(
-            row_cols, _KANBAN_STAGES, _stage_job_lists
-        ):
-            with col_obj:
-                if row_idx >= len(stage_jobs):
-                    # 占位：保持列宽但不渲染内容
-                    st.empty()
-                    continue
-                job = stage_jobs[row_idx]
-                job_uid = str(job["job_id"])
-                cur_st  = job.get("status", "pending")
+        elif _step == 1:
+            st.markdown('<div class="pw-flbl">手机号</div>', unsafe_allow_html=True)
+            _ph = st.text_input("", value=st.session_state.get("prof_phone", ""),
+                                placeholder="138xxxxxxxx", label_visibility="collapsed", key="pi_phone")
+            st.session_state.prof_phone = _ph
+            st.markdown('<div class="pw-flbl">所在城市</div>', unsafe_allow_html=True)
+            _lc = st.text_input("", value=st.session_state.get("prof_location", ""),
+                                placeholder="如：北京", label_visibility="collapsed", key="pi_loc")
+            st.session_state.prof_location = _lc
+            st.markdown('<div class="pw-flbl">一句话简介</div>', unsafe_allow_html=True)
+            _bi = st.text_input("", value=st.session_state.get("prof_bio", ""),
+                                placeholder="如：应用经济学硕士，擅长数据分析",
+                                label_visibility="collapsed", key="pi_bio")
+            st.session_state.prof_bio = _bi
 
-                st.markdown(_job_card(job, compact=True), unsafe_allow_html=True)
-                st.selectbox(
-                    "移至",
-                    options=STATUS_ORDER,
-                    index=STATUS_ORDER.index(cur_st) if cur_st in STATUS_ORDER else 0,
-                    format_func=lambda s: f"{STATUS_CONFIG[s][0]} {STATUS_CONFIG[s][1]}",
-                    key=f"kb_{job_uid}",
-                    label_visibility="collapsed",
-                    on_change=_move_job,
-                    args=(job_uid, cur_st),
-                )
-                if st.button("📋 时间线", key=f"tl_{job_uid}", use_container_width=True):
-                    _show_timeline(job)
+        elif _step == 2:
+            st.markdown('<div class="pw-flbl">学校</div>', unsafe_allow_html=True)
+            _sc = st.text_input("", value=st.session_state.get("prof_school", ""),
+                                placeholder="如：北京大学", label_visibility="collapsed", key="pe_school")
+            st.session_state.prof_school = _sc
+            st.markdown('<div class="pw-flbl">专业</div>', unsafe_allow_html=True)
+            _mj = st.text_input("", value=st.session_state.get("prof_major", ""),
+                                placeholder="如：应用经济学", label_visibility="collapsed", key="pe_major")
+            st.session_state.prof_major = _mj
+            _dc, _gc = st.columns(2)
+            with _dc:
+                st.markdown('<div class="pw-flbl">学历</div>', unsafe_allow_html=True)
+                _opts = ["硕士", "本科", "博士", "专科", "其他"]
+                _dg = st.selectbox("", _opts,
+                                   index=_opts.index(st.session_state.get("prof_degree", "硕士")),
+                                   label_visibility="collapsed", key="pe_deg")
+                st.session_state.prof_degree = _dg
+            with _gc:
+                st.markdown('<div class="pw-flbl">GPA（选填）</div>', unsafe_allow_html=True)
+                _gp = st.text_input("", value=st.session_state.get("prof_gpa", ""),
+                                    placeholder="如：3.9/4.0", label_visibility="collapsed", key="pe_gpa")
+                st.session_state.prof_gpa = _gp
+            st.markdown('<div class="pw-flbl">在校时间</div>', unsafe_allow_html=True)
+            _ed = st.text_input("", value=st.session_state.get("prof_edu_dates", ""),
+                                placeholder="如：2022.09 – 2025.06",
+                                label_visibility="collapsed", key="pe_dates")
+            st.session_state.prof_edu_dates = _ed
+            st.session_state.prof_edu = _sc or _mj
 
-    # ── 已拒绝（折叠，逐行对齐）──
-    rejected_jobs = [j for j in track_jobs if j.get("status") == "rejected"]
-    if rejected_jobs:
-        st.divider()
-        with st.expander(f"❌ 已拒绝 ({len(rejected_jobs)})", expanded=False):
-            rej_cols_per_row = 5
-            for row_start in range(0, len(rejected_jobs), rej_cols_per_row):
-                row_batch = rejected_jobs[row_start : row_start + rej_cols_per_row]
-                # pad to 5 so columns stay even
-                padded = row_batch + [None] * (rej_cols_per_row - len(row_batch))
-                rej_row_cols = st.columns(rej_cols_per_row)
-                for col_obj, job in zip(rej_row_cols, padded):
-                    with col_obj:
-                        if job is None:
-                            st.empty()
-                            continue
-                        job_uid = str(job["job_id"])
-                        cur_st  = job.get("status", "rejected")
-                        st.markdown(_job_card(job, compact=True), unsafe_allow_html=True)
-                        st.selectbox(
-                            "移至",
-                            options=STATUS_ORDER,
-                            index=STATUS_ORDER.index(cur_st) if cur_st in STATUS_ORDER else 0,
-                            format_func=lambda s: f"{STATUS_CONFIG[s][0]} {STATUS_CONFIG[s][1]}",
-                            key=f"kb_{job_uid}",
-                            label_visibility="collapsed",
-                            on_change=_move_job,
-                            args=(job_uid, cur_st),
-                        )
+        elif _step == 3:
+            st.markdown('<div class="pw-flbl">工作 / 实习经历（可粘贴简历对应段落）</div>', unsafe_allow_html=True)
+            _ex = st.text_area("", value=st.session_state.get("prof_exp", ""), height=260,
+                               placeholder="公司名 | 岗位 | 时间\n- 主要职责与成果…",
+                               label_visibility="collapsed", key="pexp_ta")
+            st.session_state.prof_exp = _ex
 
+        elif _step == 4:
+            st.markdown('<div class="pw-flbl">目标岗位（逗号分隔）</div>', unsafe_allow_html=True)
+            _pr = st.text_input("", value=st.session_state.get("preferences", ""),
+                                placeholder="如：数据分析，用户运营，策略运营",
+                                label_visibility="collapsed", key="pp_prefs")
+            st.session_state.preferences = _pr
+            st.markdown('<div class="pw-flbl">目标城市（逗号分隔）</div>', unsafe_allow_html=True)
+            _ci = st.text_input("", value=",".join(st.session_state.get("filter_cities", [])),
+                                placeholder="如：北京,上海,深圳",
+                                label_visibility="collapsed", key="pp_cities")
+            if _ci:
+                st.session_state.filter_cities = [c.strip() for c in _ci.split(",") if c.strip()]
+            st.markdown('<div class="pw-flbl">最低匹配分（0–100）</div>', unsafe_allow_html=True)
+            _ms = st.slider("", 0, 100, st.session_state.get("min_score", 60),
+                            label_visibility="collapsed", key="pp_minscore")
+            st.session_state.min_score = _ms
+
+        elif _step == 5:
+            st.markdown('<div class="pw-flbl">技能（逗号分隔）</div>', unsafe_allow_html=True)
+            _sk = st.text_area("", value=st.session_state.get("prof_skills", ""), height=130,
+                               placeholder="如：Python, SQL, Tableau, A/B测试, 用户分层",
+                               label_visibility="collapsed", key="psk_ta")
+            st.session_state.prof_skills = _sk
+
+        elif _step == 6:
+            st.markdown('<div class="pw-flbl">个人网站 / 作品集 / GitHub</div>', unsafe_allow_html=True)
+            _lk = st.text_area("", value=st.session_state.get("prof_links", ""), height=100,
+                               placeholder="https://github.com/yourname\nhttps://your-portfolio.com",
+                               label_visibility="collapsed", key="pli_ta")
+            st.session_state.prof_links = _lk
+            st.markdown('<div class="pw-flbl">备注（可选）</div>', unsafe_allow_html=True)
+            _nt = st.text_area("", value=st.session_state.get("prof_notes", ""), height=80,
+                               placeholder="其他补充信息…",
+                               label_visibility="collapsed", key="pno_ta")
+            st.session_state.prof_notes = _nt
+
+        # ── Back / Next ───────────────────────────────────────────────────────
+        st.markdown('<div style="height:16px"></div>', unsafe_allow_html=True)
+        _bc, _nc = st.columns([1, 2])
+        with _bc:
+            if _step > 0 and st.button("← 上一步", use_container_width=True, key="pw_back"):
+                st.session_state.profile_step -= 1
+                st.rerun()
+        with _nc:
+            _lbl = "完成 ✓" if _step == len(_STEPS) - 1 else "下一步 →"
+            if st.button(_lbl, use_container_width=True, type="primary", key="pw_next"):
+                if _step < len(_STEPS) - 1:
+                    st.session_state.profile_step += 1
+                    st.rerun()
+                else:
+                    st.success("资料已保存！前往「岗位匹配」开始 AI 匹配。")
 
 # ────────────────────────────────────────────────────────────────────────────────
