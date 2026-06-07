@@ -2875,6 +2875,50 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
   div[data-testid="stHorizontalBlock"] > div {
     padding: 0 !important;
 }
+/* ── st.container(border=True) 卡片样式 ── */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    border: 1px solid rgba(39,41,55,.09) !important;
+    border-radius: 14px !important;
+    padding: 4px 8px 12px !important;
+    margin-bottom: 14px !important;
+    background: #fff !important;
+}
+.pw-sec-title {
+    display:flex; align-items:center; gap:8px;
+    font-size:.88rem; font-weight:700; color:#272937;
+    padding: 14px 0 12px;
+    border-bottom: 1px solid rgba(39,41,55,.06);
+    margin-bottom: 4px;
+}
+/* ── 基本信息步骤：输入框主题红色 ── */
+/* 用 box-shadow:inset 兜底，不依赖 border 属性，可穿透 emotion CSS */
+[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="input"],
+[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="textarea"] {
+    border: 1.5px solid rgba(214,70,53,.45) !important;
+    border-radius: 8px !important;
+    background-color: rgba(214,70,53,.025) !important;
+    box-shadow: inset 0 0 0 1.5px rgba(214,70,53,.45) !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="input"]:focus-within,
+[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="textarea"]:focus-within {
+    border-color: #d64635 !important;
+    box-shadow: inset 0 0 0 2px #d64635, 0 0 0 3px rgba(214,70,53,.15) !important;
+}
+/* 同时覆盖 input 元素本身（双保险） */
+[data-testid="stVerticalBlockBorderWrapper"] input,
+[data-testid="stVerticalBlockBorderWrapper"] textarea {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+/* label 样式 */
+[data-testid="stVerticalBlockBorderWrapper"] label p {
+    color: rgba(39,41,55,.5) !important;
+    font-size: .7rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: .06em !important;
+}
 </style>""", unsafe_allow_html=True)
 
     # ── Build sidebar HTML ────────────────────────────────────────────────────
@@ -2957,53 +3001,6 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                 st.session_state.resume_text = _rt
 
         elif _step == 1:
-            # CSS: style Streamlit's native bordered containers to match design
-            st.markdown("""<style>
-/* 覆盖 st.container(border=True) 默认样式 */
-[data-testid="stVerticalBlockBorderWrapper"] {
-    border: 1px solid rgba(39,41,55,.09) !important;
-    border-radius: 14px !important;
-    padding: 4px 8px 12px !important;
-    margin-bottom: 14px !important;
-    background: #fff !important;
-}
-.pw-sec-title {
-    display:flex; align-items:center; gap:8px;
-    font-size:.88rem; font-weight:700; color:#272937;
-    padding: 14px 0 12px;
-    border-bottom: 1px solid rgba(39,41,55,.06);
-    margin-bottom: 4px;
-}
-/* 输入框主题红色 —— Streamlit 实际使用 BaseWeb，容器是 [data-baseweb="input"] */
-[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="input"] {
-    border: 1.5px solid rgba(214,70,53,.4) !important;
-    border-radius: 8px !important;
-    background: rgba(214,70,53,.03) !important;
-    transition: border-color .15s, box-shadow .15s !important;
-}
-[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="input"]:focus-within {
-    border-color: #d64635 !important;
-    box-shadow: 0 0 0 3px rgba(214,70,53,.13) !important;
-}
-/* textarea（专业链接里无，但统一处理）*/
-[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="textarea"] {
-    border: 1.5px solid rgba(214,70,53,.4) !important;
-    border-radius: 8px !important;
-    background: rgba(214,70,53,.03) !important;
-}
-[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="textarea"]:focus-within {
-    border-color: #d64635 !important;
-    box-shadow: 0 0 0 3px rgba(214,70,53,.13) !important;
-}
-/* label */
-[data-testid="stVerticalBlockBorderWrapper"] label p {
-    color: rgba(39,41,55,.55) !important;
-    font-size: .72rem !important;
-    font-weight: 600 !important;
-    text-transform: uppercase !important;
-    letter-spacing: .05em !important;
-}
-</style>""", unsafe_allow_html=True)
 
             st.markdown('<div class="pw-note"><b>说明：</b>个人信息仅用于 AI 岗位推荐，不会对外共享。</div>', unsafe_allow_html=True)
 
