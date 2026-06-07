@@ -2936,7 +2936,12 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
             if _uploaded:
                 with st.spinner("解析中…"):
                     try:
-                        _txt = parse_resume(_uploaded)
+                        _suffix = ".pdf" if _uploaded.name.lower().endswith(".pdf") else ".docx"
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=_suffix) as _tmp:
+                            _tmp.write(_uploaded.read())
+                            _tmp_path = _tmp.name
+                        _txt = parse_resume(_tmp_path)
+                        os.unlink(_tmp_path)
                         st.session_state.resume_text = _txt
                         st.success("解析成功！")
                         st.rerun()
