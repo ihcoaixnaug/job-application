@@ -2943,7 +2943,7 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                         _txt = parse_resume(_tmp_path)
                         os.unlink(_tmp_path)
                         st.session_state.resume_text = _txt
-                        st.success("解析成功！")
+                        st.session_state.profile_step = 1
                         st.rerun()
                     except Exception as _e:
                         st.error(f"解析失败：{_e}")
