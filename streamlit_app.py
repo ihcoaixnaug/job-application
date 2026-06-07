@@ -2974,6 +2974,31 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
     border-bottom: 1px solid rgba(39,41,55,.06);
     margin-bottom: 4px;
 }
+/* 输入框主题色 */
+[data-testid="stVerticalBlockBorderWrapper"] input[type="text"],
+[data-testid="stVerticalBlockBorderWrapper"] input[type="email"],
+[data-testid="stVerticalBlockBorderWrapper"] input[type="tel"] {
+    border: 1.5px solid rgba(214,70,53,.35) !important;
+    border-radius: 8px !important;
+    background: rgba(214,70,53,.03) !important;
+    color: #272937 !important;
+    transition: border-color .15s, box-shadow .15s;
+}
+[data-testid="stVerticalBlockBorderWrapper"] input[type="text"]:focus,
+[data-testid="stVerticalBlockBorderWrapper"] input[type="email"]:focus,
+[data-testid="stVerticalBlockBorderWrapper"] input[type="tel"]:focus {
+    border-color: #d64635 !important;
+    box-shadow: 0 0 0 3px rgba(214,70,53,.12) !important;
+    outline: none !important;
+}
+/* label 颜色 */
+[data-testid="stVerticalBlockBorderWrapper"] label p {
+    color: rgba(39,41,55,.55) !important;
+    font-size: .72rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: .05em !important;
+}
 </style>""", unsafe_allow_html=True)
 
             st.markdown('<div class="pw-note"><b>说明：</b>个人信息仅用于 AI 岗位推荐，不会对外共享。</div>', unsafe_allow_html=True)
