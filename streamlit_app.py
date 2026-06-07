@@ -2890,27 +2890,18 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
     border-bottom: 1px solid rgba(39,41,55,.06);
     margin-bottom: 4px;
 }
-/* ── 基本信息步骤：输入框主题红色 ──
-   outline 属性：emotion/BaseWeb 不在 virtual DOM 中管理它，
-   因此既不会被 inline style 覆盖，也不会被 React 重渲染清除。 */
-[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="input"],
-[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="textarea"] {
+/* ── 输入框主题红色边框 ──
+   stVerticalBlockBorderWrapper 在当前 Streamlit 版本不存在，直接用 [data-baseweb="input"] */
+[data-baseweb="input"],
+[data-baseweb="textarea"] {
     outline: 1.5px solid rgba(214,70,53,.45) !important;
     outline-offset: -2px !important;
 }
-[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="input"]:focus-within,
-[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="textarea"]:focus-within {
+[data-baseweb="input"]:focus-within,
+[data-baseweb="textarea"]:focus-within {
     outline: 2px solid #d64635 !important;
     outline-offset: -2px !important;
     box-shadow: 0 0 0 3px rgba(214,70,53,.15) !important;
-}
-/* label 样式 */
-[data-testid="stVerticalBlockBorderWrapper"] label p {
-    color: rgba(39,41,55,.5) !important;
-    font-size: .7rem !important;
-    font-weight: 700 !important;
-    text-transform: uppercase !important;
-    letter-spacing: .06em !important;
 }
 </style>""", unsafe_allow_html=True)
 
@@ -3003,10 +2994,7 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
   var RED = 'rgba(214,70,53,.45)';
   function applyOutline(){
     var doc = window.parent.document;
-    doc.querySelectorAll(
-      '[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="input"],' +
-      '[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="textarea"]'
-    ).forEach(function(b){
+    doc.querySelectorAll('[data-baseweb="input"],[data-baseweb="textarea"]').forEach(function(b){
       b.style.setProperty('outline','1.5px solid '+RED,'important');
       b.style.setProperty('outline-offset','-2px','important');
     });
