@@ -2890,26 +2890,19 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
     border-bottom: 1px solid rgba(39,41,55,.06);
     margin-bottom: 4px;
 }
-/* ── 基本信息步骤：输入框主题红色 ── */
-/* 用 box-shadow:inset 兜底，不依赖 border 属性，可穿透 emotion CSS */
+/* ── 基本信息步骤：输入框主题红色 ──
+   outline 属性：emotion/BaseWeb 不在 virtual DOM 中管理它，
+   因此既不会被 inline style 覆盖，也不会被 React 重渲染清除。 */
 [data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="input"],
 [data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="textarea"] {
-    border: 1.5px solid rgba(214,70,53,.45) !important;
-    border-radius: 8px !important;
-    background-color: rgba(214,70,53,.025) !important;
-    box-shadow: inset 0 0 0 1.5px rgba(214,70,53,.45) !important;
+    outline: 1.5px solid rgba(214,70,53,.45) !important;
+    outline-offset: -2px !important;
 }
 [data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="input"]:focus-within,
 [data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="textarea"]:focus-within {
-    border-color: #d64635 !important;
-    box-shadow: inset 0 0 0 2px #d64635, 0 0 0 3px rgba(214,70,53,.15) !important;
-}
-/* 同时覆盖 input 元素本身（双保险） */
-[data-testid="stVerticalBlockBorderWrapper"] input,
-[data-testid="stVerticalBlockBorderWrapper"] textarea {
-    border: none !important;
-    background: transparent !important;
-    box-shadow: none !important;
+    outline: 2px solid #d64635 !important;
+    outline-offset: -2px !important;
+    box-shadow: 0 0 0 3px rgba(214,70,53,.15) !important;
 }
 /* label 样式 */
 [data-testid="stVerticalBlockBorderWrapper"] label p {
@@ -3005,35 +2998,27 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
             import streamlit.components.v1 as _cv1
             _cv1.html("""<script>
 (function(){
+  /* outline ≠ border: React/BaseWeb never manages outline in its vdom,
+     so these inline styles survive re-renders without being reset. */
   var RED = 'rgba(214,70,53,.45)';
-  var RED_BG = 'rgba(214,70,53,.03)';
-  function applyRed(){
+  function applyOutline(){
     var doc = window.parent.document;
-    var wrappers = doc.querySelectorAll('[data-testid="stVerticalBlockBorderWrapper"]');
-    wrappers.forEach(function(w){
-      var boxes = w.querySelectorAll('[data-baseweb="input"],[data-baseweb="textarea"]');
-      boxes.forEach(function(b){
-        b.style.setProperty('border','1.5px solid '+RED,'important');
-        b.style.setProperty('border-radius','8px','important');
-        b.style.setProperty('background-color',RED_BG,'important');
-      });
-      w.addEventListener('focusin',function(e){
-        var box=e.target.closest('[data-baseweb="input"],[data-baseweb="textarea"]');
-        if(box){box.style.setProperty('border','2px solid #d64635','important');
-                 box.style.setProperty('box-shadow','0 0 0 3px rgba(214,70,53,.15)','important');}
-      },true);
-      w.addEventListener('focusout',function(e){
-        var box=e.target.closest('[data-baseweb="input"],[data-baseweb="textarea"]');
-        if(box){box.style.setProperty('border','1.5px solid '+RED,'important');
-                 box.style.setProperty('box-shadow','none','important');}
-      },true);
+    doc.querySelectorAll(
+      '[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="input"],' +
+      '[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="textarea"]'
+    ).forEach(function(b){
+      b.style.setProperty('outline','1.5px solid '+RED,'important');
+      b.style.setProperty('outline-offset','-2px','important');
     });
   }
-  applyRed();
-  [100,300,800,2000].forEach(function(t){setTimeout(applyRed,t);});
-  new MutationObserver(applyRed).observe(
-    window.parent.document.body,{childList:true,subtree:true}
-  );
+  applyOutline();
+  [100,300,800,2000].forEach(function(t){setTimeout(applyOutline,t);});
+  var obs = new MutationObserver(function(){
+    obs.disconnect();
+    applyOutline();
+    obs.observe(window.parent.document.body,{childList:true,subtree:true});
+  });
+  obs.observe(window.parent.document.body,{childList:true,subtree:true});
 })();
 </script>""", height=0, scrolling=False)
 
