@@ -2974,24 +2974,28 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
     border-bottom: 1px solid rgba(39,41,55,.06);
     margin-bottom: 4px;
 }
-/* 输入框主题色 */
-[data-testid="stVerticalBlockBorderWrapper"] input[type="text"],
-[data-testid="stVerticalBlockBorderWrapper"] input[type="email"],
-[data-testid="stVerticalBlockBorderWrapper"] input[type="tel"] {
-    border: 1.5px solid rgba(214,70,53,.35) !important;
+/* 输入框主题红色 —— Streamlit 实际使用 BaseWeb，容器是 [data-baseweb="input"] */
+[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="input"] {
+    border: 1.5px solid rgba(214,70,53,.4) !important;
     border-radius: 8px !important;
     background: rgba(214,70,53,.03) !important;
-    color: #272937 !important;
-    transition: border-color .15s, box-shadow .15s;
+    transition: border-color .15s, box-shadow .15s !important;
 }
-[data-testid="stVerticalBlockBorderWrapper"] input[type="text"]:focus,
-[data-testid="stVerticalBlockBorderWrapper"] input[type="email"]:focus,
-[data-testid="stVerticalBlockBorderWrapper"] input[type="tel"]:focus {
+[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="input"]:focus-within {
     border-color: #d64635 !important;
-    box-shadow: 0 0 0 3px rgba(214,70,53,.12) !important;
-    outline: none !important;
+    box-shadow: 0 0 0 3px rgba(214,70,53,.13) !important;
 }
-/* label 颜色 */
+/* textarea（专业链接里无，但统一处理）*/
+[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="textarea"] {
+    border: 1.5px solid rgba(214,70,53,.4) !important;
+    border-radius: 8px !important;
+    background: rgba(214,70,53,.03) !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="textarea"]:focus-within {
+    border-color: #d64635 !important;
+    box-shadow: 0 0 0 3px rgba(214,70,53,.13) !important;
+}
+/* label */
 [data-testid="stVerticalBlockBorderWrapper"] label p {
     color: rgba(39,41,55,.55) !important;
     font-size: .72rem !important;
