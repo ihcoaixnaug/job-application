@@ -3111,7 +3111,7 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                 _lk_portfolio = st.text_input("作品集 / 个人网站", value=st.session_state.get("prof_portfolio", ""),
                                               placeholder="https://your-portfolio.com", key="pi_portfolio")
                 st.session_state.prof_portfolio = _lk_portfolio
-                _lk_linkedin = st.text_input("LinkedIn（选填）", value=st.session_state.get("prof_linkedin", ""),
+                _lk_linkedin = st.text_input("LinkedIn", value=st.session_state.get("prof_linkedin", ""),
                                              placeholder="https://linkedin.com/in/yourname", key="pi_linkedin")
                 st.session_state.prof_linkedin = _lk_linkedin
             st.markdown('</div>', unsafe_allow_html=True)
@@ -3138,7 +3138,7 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                                    label_visibility="collapsed", key="pe_deg")
                 st.session_state.prof_degree = _dg
             with _gc:
-                st.markdown('<div class="pw-flbl">GPA（选填）</div>', unsafe_allow_html=True)
+                st.markdown('<div class="pw-flbl">GPA</div>', unsafe_allow_html=True)
                 _gp = st.text_input("", value=st.session_state.get("prof_gpa", ""),
                                     placeholder="如：3.9/4.0", label_visibility="collapsed", key="pe_gpa")
                 st.session_state.prof_gpa = _gp
@@ -3174,6 +3174,7 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
             st.session_state.min_score = _ms
 
         elif _step == 5:
+            st.markdown('<div class="pw-note">技能填写越详细，AI 匹配准确度越高。建议列出工具、语言、方法论等。</div>', unsafe_allow_html=True)
             st.markdown('<div class="pw-flbl">技能（逗号分隔）</div>', unsafe_allow_html=True)
             _sk = st.text_area("", value=st.session_state.get("prof_skills", ""), height=130,
                                placeholder="如：Python, SQL, Tableau, A/B测试, 用户分层",
@@ -3186,7 +3187,6 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                                placeholder="https://github.com/yourname\nhttps://your-portfolio.com",
                                label_visibility="collapsed", key="pli_ta")
             st.session_state.prof_links = _lk
-            st.markdown('<div class="pw-flbl">备注（可选）</div>', unsafe_allow_html=True)
             _nt = st.text_area("", value=st.session_state.get("prof_notes", ""), height=80,
                                placeholder="其他补充信息…",
                                label_visibility="collapsed", key="pno_ta")
@@ -3202,7 +3202,9 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
         with _nc:
             _lbl = "完成 ✓" if _step == len(_STEPS) - 1 else "下一步 →"
             if st.button(_lbl, use_container_width=True, type="primary", key="pw_next"):
-                if _step < len(_STEPS) - 1:
+                if _step == 4 and not st.session_state.get("preferences", "").strip():
+                    st.warning("建议填写目标岗位方向，AI 匹配效果更准确。")
+                elif _step < len(_STEPS) - 1:
                     st.session_state.profile_step += 1
                     st.rerun()
                 else:
