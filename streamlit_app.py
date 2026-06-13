@@ -14,6 +14,7 @@ import streamlit as st
 
 from company_tiers import get_company_tier
 from matcher import diagnose_resume, extract_profile_from_resume, generate_greeting, generate_interview_prep, match_jobs
+from profile_store import load_profile, save_profile
 from resume_parser import parse_resume
 from tracker import (
     add_job_from_match, add_job_manual, add_timeline_event,
@@ -589,6 +590,13 @@ def _init_state():
             st.session_state[k] = v
 
 _init_state()
+
+# 首次加载时从磁盘恢复 profile（页面导航会重建 session，这里补回数据）
+if not st.session_state.get("_profile_loaded"):
+    for _k, _v in load_profile().items():
+        if _k not in st.session_state or not st.session_state[_k]:
+            st.session_state[_k] = _v
+    st.session_state._profile_loaded = True
 
 _page = st.query_params.get("page", "dashboard")
 if _page not in ("dashboard", "jobs", "resume", "progress", "settings"):
@@ -3221,12 +3229,14 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                 else:
                     st.session_state.prof_saved = True
                     st.session_state._show_saved_ok = True
+                    save_profile(st.session_state)
                     st.rerun()
         if _is_mid_step:
             with _fc:
                 if st.button("直接完成 ✓", use_container_width=True, key="pw_finish_fast"):
                     st.session_state.prof_saved = True
                     st.session_state._show_saved_ok = True
+                    save_profile(st.session_state)
                     st.rerun()
 
         if st.session_state.get("_show_saved_ok"):

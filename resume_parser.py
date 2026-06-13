@@ -1,5 +1,18 @@
 """Parse Word (.docx) and PDF resumes into plain text."""
+import re
 from pathlib import Path
+
+
+def _clean_text(text: str) -> str:
+    """Replace runs of whitespace/tabs with a single space, strip lines."""
+    text = re.sub(r"[ \t]+", " ", text)
+    lines = [ln.strip() for ln in text.splitlines()]
+    # Drop duplicate consecutive lines (merged-cell artefacts)
+    deduped: list[str] = []
+    for ln in lines:
+        if ln and (not deduped or ln != deduped[-1]):
+            deduped.append(ln)
+    return "\n".join(deduped)
 
 
 def parse_docx(filepath: str | Path) -> str:
@@ -9,17 +22,18 @@ def parse_docx(filepath: str | Path) -> str:
     parts: list[str] = []
 
     for para in doc.paragraphs:
-        text = para.text.strip()
+        text = re.sub(r"[ \t]+", " ", para.text).strip()
         if text:
             parts.append(text)
 
     for table in doc.tables:
         for row in table.rows:
-            row_cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            row_cells = [re.sub(r"[ \t]+", " ", cell.text).strip()
+                         for cell in row.cells if cell.text.strip()]
             if row_cells:
                 parts.append(" | ".join(row_cells))
 
-    return "\n".join(parts)
+    return _clean_text("\n".join(parts))
 
 
 def parse_pdf(filepath: str | Path) -> str:
