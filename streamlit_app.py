@@ -1,5 +1,6 @@
 """Offer捕手 — AI 求职全链路助手（Streamlit 前端）"""
 import asyncio
+import hashlib
 import html as _html
 import json
 import os
