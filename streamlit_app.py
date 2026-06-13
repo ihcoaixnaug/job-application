@@ -1326,10 +1326,11 @@ cities_filter = st.session_state.get("filter_cities", [])
 sort_by      = st.session_state.get("sort_by_pref", "匹配分（高→低）")
 
 # ── 顶部导航栏 ─────────────────────────────────────────────────────────────────
-def _nav_link(label: str, page: str, icon_path: str = "") -> str:
+def _nav_link(label: str, page: str, icon_path: str = "", dot: bool = False) -> str:
     active = "nav-active" if _page == page else ""
     svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{icon_path}</svg>' if icon_path else ""
-    return f'<a href="?page={page}" target="_self" class="app-nav-link {active}">{svg}{label}</a>'
+    badge = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#22c55e;margin-left:3px;margin-bottom:6px;flex-shrink:0"></span>' if dot else ""
+    return f'<a href="?page={page}" target="_self" class="app-nav-link {active}">{svg}{label}{badge}</a>'
 
 _icon_dash   = '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'
 _icon_jobs   = '<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><line x1="12" y1="12" x2="12" y2="12"/>'
@@ -1347,7 +1348,8 @@ _bell_svg = f'<svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke
 _help_svg = f'<svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{_icon_help}</svg>'
 _caret_svg = '<svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>'
 
-st.markdown(f"""<nav class="app-nav"><a href="?show_landing=1" target="_self" class="app-nav-brand"><span class="app-nav-brand-name"><span class="brand-offer">Offer</span><span class="brand-catch">捕手</span></span></a><div class="app-nav-links">{_nav_link("仪表盘","dashboard",_icon_dash)}{_nav_link("岗位匹配","jobs",_icon_jobs)}{_nav_link("已保存","jobs",_icon_saved)}{_nav_link("简历诊断","resume",_icon_resume)}{_nav_link("我的","progress",_icon_prog)}</div><div class="app-nav-right"><span class="app-nav-icon-btn" title="暂无通知">{_bell_svg}</span><a class="app-nav-icon-btn" href="?show_landing=1" target="_self" title="帮助">{_help_svg}</a><div class="app-nav-divider"></div><a href="?page=settings" target="_self" class="app-nav-icon-btn" title="设置">{_svg(_icon_set, 18)}</a></div></nav>""", unsafe_allow_html=True)
+_prof_saved = bool(st.session_state.get("prof_saved") or st.session_state.get("prof_lastname") or st.session_state.get("prof_school"))
+st.markdown(f"""<nav class="app-nav"><a href="?show_landing=1" target="_self" class="app-nav-brand"><span class="app-nav-brand-name"><span class="brand-offer">Offer</span><span class="brand-catch">捕手</span></span></a><div class="app-nav-links">{_nav_link("我的","progress",_icon_prog,dot=_prof_saved)}{_nav_link("岗位匹配","jobs",_icon_jobs)}{_nav_link("仪表盘","dashboard",_icon_dash)}{_nav_link("简历诊断","resume",_icon_resume)}</div><div class="app-nav-right"><span class="app-nav-icon-btn" title="暂无通知">{_bell_svg}</span><a class="app-nav-icon-btn" href="?show_landing=1" target="_self" title="帮助">{_help_svg}</a><div class="app-nav-divider"></div><a href="?page=settings" target="_self" class="app-nav-icon-btn" title="设置">{_svg(_icon_set, 18)}</a></div></nav>""", unsafe_allow_html=True)
 
 # ════════════════════════════════════════════════════════════════════════════════
 # 设置页  (page=settings)
@@ -2988,6 +2990,7 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                     _cr = _extracted.get("cities", "")
                     if _cr:
                         st.session_state.filter_cities = [c.strip() for c in _cr.split(",") if c.strip()]
+                    st.session_state.prof_saved = True
                 st.session_state.profile_step = 1
 
             _uploaded = st.file_uploader(
@@ -3208,6 +3211,7 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                     st.session_state.profile_step += 1
                     st.rerun()
                 else:
+                    st.session_state.prof_saved = True
                     st.success("资料已保存！前往「岗位匹配」开始 AI 匹配。")
 
 # ────────────────────────────────────────────────────────────────────────────────
