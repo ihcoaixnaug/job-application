@@ -279,3 +279,54 @@ def _mock_match(jobs: List[Dict]) -> List[Dict]:
         job["match_reason"] = "（演示模式）请在设置中填入 OpenRouter API Key 以启用 AI 匹配"
     jobs.sort(key=lambda x: x.get("match_score", 0), reverse=True)
     return jobs
+
+
+_EXTRACT_PROMPT = """你是一个简历信息提取助手。请从下面的简历文本中提取结构化信息，严格以 JSON 格式返回，不要有任何多余内容。
+
+字段说明：
+- lastname: 姓（汉字或英文 Last Name）
+- firstname: 名（汉字或英文 First Name）
+- email: 邮箱地址
+- phone: 手机号
+- location: 现居城市（只写城市名，如"北京"）
+- bio: 一句话简介（20字以内，如"应用经济学硕士，擅长数据分析"）
+- github: GitHub 主页 URL（没有则留空字符串）
+- portfolio: 个人网站/作品集 URL（没有则留空字符串）
+- linkedin: LinkedIn URL（没有则留空字符串）
+- school: 最高学历学校名称
+- major: 专业名称
+- degree: 学历，只能是以下之一：硕士/本科/博士/专科/其他
+- gpa: GPA（如"3.9/4.0"，没有则留空字符串）
+- edu_dates: 在校时间（如"2022.09 – 2025.06"）
+- exp: 工作/实习经历，保留原文格式，多段用换行分隔（最多 600 字）
+- skills: 技能列表，逗号分隔（如"Python, SQL, Tableau, A/B测试"）
+- preferences: 目标岗位方向，逗号分隔（从简历中推断，如"数据分析, 用户运营"）
+- cities: 目标城市，逗号分隔（从简历中推断，如"北京, 上海"）
+
+简历内容：
+{resume}
+
+请输出 JSON，格式如下（所有字段必须存在，找不到的留空字符串）：
+{{"lastname":"","firstname":"","email":"","phone":"","location":"","bio":"","github":"","portfolio":"","linkedin":"","school":"","major":"","degree":"本科","gpa":"","edu_dates":"","exp":"","skills":"","preferences":"","cities":""}}"""
+
+
+async def extract_profile_from_resume(resume: str) -> Dict:
+    """Call OpenRouter to extract structured profile fields from resume text."""
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if not api_key:
+        return {}
+
+    client = _client()
+    try:
+        resp = await client.chat.completions.create(
+            model=_model(),
+            max_tokens=1000,
+            messages=[{"role": "user", "content": _EXTRACT_PROMPT.format(resume=resume[:3000])}],
+        )
+        text = resp.choices[0].message.content or ""
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            return json.loads(m.group())
+    except Exception:
+        pass
+    return {}

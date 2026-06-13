@@ -13,7 +13,7 @@ from pathlib import Path
 import streamlit as st
 
 from company_tiers import get_company_tier
-from matcher import diagnose_resume, generate_greeting, generate_interview_prep, match_jobs
+from matcher import diagnose_resume, extract_profile_from_resume, generate_greeting, generate_interview_prep, match_jobs
 from resume_parser import parse_resume
 from tracker import (
     add_job_from_match, add_job_manual, add_timeline_event,
@@ -2963,7 +2963,7 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                 "上传简历文件", type=["pdf", "docx"], label_visibility="collapsed"
             )
             if _uploaded:
-                with st.spinner("解析中…"):
+                with st.spinner("解析中，AI 自动提取信息…"):
                     try:
                         _suffix = ".pdf" if _uploaded.name.lower().endswith(".pdf") else ".docx"
                         with tempfile.NamedTemporaryFile(delete=False, suffix=_suffix) as _tmp:
@@ -2972,6 +2972,32 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                         _txt = parse_resume(_tmp_path)
                         os.unlink(_tmp_path)
                         st.session_state.resume_text = _txt
+                        # AI 自动提取简历字段
+                        _extracted = asyncio.run(extract_profile_from_resume(_txt))
+                        if _extracted:
+                            _deg_valid = {"硕士", "本科", "博士", "专科", "其他"}
+                            st.session_state.prof_lastname   = _extracted.get("lastname", "")
+                            st.session_state.prof_firstname  = _extracted.get("firstname", "")
+                            st.session_state.prof_email      = _extracted.get("email", "")
+                            st.session_state.prof_phone      = _extracted.get("phone", "")
+                            st.session_state.prof_location   = _extracted.get("location", "")
+                            st.session_state.prof_bio        = _extracted.get("bio", "")
+                            st.session_state.prof_github     = _extracted.get("github", "")
+                            st.session_state.prof_portfolio  = _extracted.get("portfolio", "")
+                            st.session_state.prof_linkedin   = _extracted.get("linkedin", "")
+                            st.session_state.prof_school     = _extracted.get("school", "")
+                            st.session_state.prof_major      = _extracted.get("major", "")
+                            _deg = _extracted.get("degree", "本科")
+                            st.session_state.prof_degree     = _deg if _deg in _deg_valid else "本科"
+                            st.session_state.prof_gpa        = _extracted.get("gpa", "")
+                            st.session_state.prof_edu_dates  = _extracted.get("edu_dates", "")
+                            st.session_state.prof_exp        = _extracted.get("exp", "")
+                            st.session_state.prof_skills     = _extracted.get("skills", "")
+                            if _extracted.get("preferences"):
+                                st.session_state.preferences = _extracted["preferences"]
+                            _cities_raw = _extracted.get("cities", "")
+                            if _cities_raw:
+                                st.session_state.filter_cities = [c.strip() for c in _cities_raw.split(",") if c.strip()]
                         st.session_state.profile_step = 1
                         st.rerun()
                     except Exception as _e:
@@ -3011,7 +3037,7 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
 })();
 </script>""", height=0, scrolling=False)
 
-            st.markdown('<div class="pw-note"><b>说明：</b>个人信息仅用于 AI 岗位推荐，不会对外共享。</div>', unsafe_allow_html=True)
+            st.markdown('<div class="pw-note"><b>说明：</b>以下字段已由 AI 根据简历自动填充，请核对后修改，确认无误后点击「下一步」。个人信息仅用于 AI 岗位推荐，不会对外共享。</div>', unsafe_allow_html=True)
 
             # ── 个人信息 ── st.container(border=True) 真正包裹 widgets ─────────
             with st.container(border=True):
