@@ -3197,7 +3197,15 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
 
         # ── Back / Next ───────────────────────────────────────────────────────
         st.markdown('<div style="height:16px"></div>', unsafe_allow_html=True)
-        _bc, _nc = st.columns([1, 2])
+
+        # 中间步骤（1-5）显示"直接完成"快捷按钮
+        _is_mid_step = 0 < _step < len(_STEPS) - 1
+        if _is_mid_step:
+            _bc, _nc, _fc = st.columns([1, 2, 2])
+        else:
+            _bc, _nc = st.columns([1, 3])
+            _fc = None
+
         with _bc:
             if _step > 0 and st.button("← 上一步", use_container_width=True, key="pw_back"):
                 st.session_state.profile_step -= 1
@@ -3212,6 +3220,18 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                     st.rerun()
                 else:
                     st.session_state.prof_saved = True
-                    st.success("资料已保存！前往「岗位匹配」开始 AI 匹配。")
+                    st.session_state._show_saved_ok = True
+                    st.rerun()
+        if _is_mid_step:
+            with _fc:
+                if st.button("直接完成 ✓", use_container_width=True, key="pw_finish_fast"):
+                    st.session_state.prof_saved = True
+                    st.session_state._show_saved_ok = True
+                    st.rerun()
+
+        if st.session_state.get("_show_saved_ok"):
+            st.session_state._show_saved_ok = False
+            st.success("资料已保存！")
+            st.link_button("前往岗位匹配 →", "?page=jobs", use_container_width=True, type="primary")
 
 # ────────────────────────────────────────────────────────────────────────────────
