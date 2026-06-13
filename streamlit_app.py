@@ -2959,6 +2959,37 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                 '也可以直接在下方粘贴文本。</div>',
                 unsafe_allow_html=True,
             )
+
+            def _apply_resume_text(txt: str):
+                """解析文本 → AI 提取字段 → 写入 session_state → 跳转 step 1。"""
+                st.session_state.resume_text = txt
+                _extracted = asyncio.run(extract_profile_from_resume(txt))
+                if _extracted:
+                    _dv = {"硕士", "本科", "博士", "专科", "其他"}
+                    st.session_state.prof_lastname   = _extracted.get("lastname", "")
+                    st.session_state.prof_firstname  = _extracted.get("firstname", "")
+                    st.session_state.prof_email      = _extracted.get("email", "")
+                    st.session_state.prof_phone      = _extracted.get("phone", "")
+                    st.session_state.prof_location   = _extracted.get("location", "")
+                    st.session_state.prof_bio        = _extracted.get("bio", "")
+                    st.session_state.prof_github     = _extracted.get("github", "")
+                    st.session_state.prof_portfolio  = _extracted.get("portfolio", "")
+                    st.session_state.prof_linkedin   = _extracted.get("linkedin", "")
+                    st.session_state.prof_school     = _extracted.get("school", "")
+                    st.session_state.prof_major      = _extracted.get("major", "")
+                    _deg = _extracted.get("degree", "本科")
+                    st.session_state.prof_degree     = _deg if _deg in _dv else "本科"
+                    st.session_state.prof_gpa        = _extracted.get("gpa", "")
+                    st.session_state.prof_edu_dates  = _extracted.get("edu_dates", "")
+                    st.session_state.prof_exp        = _extracted.get("exp", "")
+                    st.session_state.prof_skills     = _extracted.get("skills", "")
+                    if _extracted.get("preferences"):
+                        st.session_state.preferences = _extracted["preferences"]
+                    _cr = _extracted.get("cities", "")
+                    if _cr:
+                        st.session_state.filter_cities = [c.strip() for c in _cr.split(",") if c.strip()]
+                st.session_state.profile_step = 1
+
             _uploaded = st.file_uploader(
                 "上传简历文件", type=["pdf", "docx"], label_visibility="collapsed"
             )
@@ -2971,38 +3002,33 @@ div[data-testid="stHorizontalBlock"]:has(.pw-sidebar-inner)
                             _tmp_path = _tmp.name
                         _txt = parse_resume(_tmp_path)
                         os.unlink(_tmp_path)
-                        st.session_state.resume_text = _txt
-                        # AI 自动提取简历字段
-                        _extracted = asyncio.run(extract_profile_from_resume(_txt))
-                        if _extracted:
-                            _deg_valid = {"硕士", "本科", "博士", "专科", "其他"}
-                            st.session_state.prof_lastname   = _extracted.get("lastname", "")
-                            st.session_state.prof_firstname  = _extracted.get("firstname", "")
-                            st.session_state.prof_email      = _extracted.get("email", "")
-                            st.session_state.prof_phone      = _extracted.get("phone", "")
-                            st.session_state.prof_location   = _extracted.get("location", "")
-                            st.session_state.prof_bio        = _extracted.get("bio", "")
-                            st.session_state.prof_github     = _extracted.get("github", "")
-                            st.session_state.prof_portfolio  = _extracted.get("portfolio", "")
-                            st.session_state.prof_linkedin   = _extracted.get("linkedin", "")
-                            st.session_state.prof_school     = _extracted.get("school", "")
-                            st.session_state.prof_major      = _extracted.get("major", "")
-                            _deg = _extracted.get("degree", "本科")
-                            st.session_state.prof_degree     = _deg if _deg in _deg_valid else "本科"
-                            st.session_state.prof_gpa        = _extracted.get("gpa", "")
-                            st.session_state.prof_edu_dates  = _extracted.get("edu_dates", "")
-                            st.session_state.prof_exp        = _extracted.get("exp", "")
-                            st.session_state.prof_skills     = _extracted.get("skills", "")
-                            if _extracted.get("preferences"):
-                                st.session_state.preferences = _extracted["preferences"]
-                            _cities_raw = _extracted.get("cities", "")
-                            if _cities_raw:
-                                st.session_state.filter_cities = [c.strip() for c in _cities_raw.split(",") if c.strip()]
-                        st.session_state.profile_step = 1
+                        _apply_resume_text(_txt)
                         st.rerun()
                     except Exception as _e:
                         st.error(f"解析失败：{_e}")
-            st.markdown('<div class="pw-divider"></div><div class="pw-flbl">或直接粘贴简历文本</div>', unsafe_allow_html=True)
+
+            # ── 示例简历 ──────────────────────────────────────────────────────
+            st.markdown('<div class="pw-divider"></div>', unsafe_allow_html=True)
+            _sample_path = Path(__file__).parent / "sample_resume.docx"
+            if _sample_path.exists():
+                _sc1, _sc2 = st.columns([3, 2])
+                with _sc1:
+                    st.markdown(
+                        '<div style="font-size:.85rem;color:#64748b;padding-top:6px">'
+                        '没有简历文件？用示例简历快速体验系统</div>',
+                        unsafe_allow_html=True,
+                    )
+                with _sc2:
+                    if st.button("📄 导入示例简历", use_container_width=True, key="pw_load_sample"):
+                        with st.spinner("AI 解析示例简历…"):
+                            try:
+                                _stxt = parse_resume(str(_sample_path))
+                                _apply_resume_text(_stxt)
+                                st.rerun()
+                            except Exception as _e:
+                                st.error(f"示例简历加载失败：{_e}")
+
+            st.markdown('<div class="pw-flbl">或直接粘贴简历文本</div>', unsafe_allow_html=True)
             _rt = st.text_area(
                 "", value=st.session_state.resume_text or "",
                 height=200, placeholder="将简历内容粘贴到这里…",
